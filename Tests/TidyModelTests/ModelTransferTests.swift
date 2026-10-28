@@ -73,7 +73,9 @@ struct ModelTransferTests {
 }
 
 private actor NeverLoadRuntime: LocalModelRuntime {
-  func loadAndCheck(directory: URL) async throws { Issue.record("Corrupt downloads must not load") }
+  func loadAndCheck(directory: URL, commit: @Sendable () throws -> Void) async throws {
+    Issue.record("Corrupt downloads must not load")
+  }
   func unload() async {}
 }
 

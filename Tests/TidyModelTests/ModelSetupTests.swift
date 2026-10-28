@@ -4,6 +4,135 @@ import TidyModel
 
 @MainActor
 struct ModelSetupTests {
+  @Test func replacementPauseResumeAndCancellationKeepOriginalUsableAndCleanPartials() async throws
+  {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let next = ModelManifest(
+      id: "fixture", revision: "test-v2", name: "Fixture 2", files: fixtureManifest.files)
+    let original = ModelSetup(
+      root: root, manifest: fixtureManifest, transfer: ControlledTransfer(),
+      runtime: ControlledRuntime())
+    await original.download(consent: true)
+    let transfer = InterruptibleTransfer()
+    let runtime = ControlledRuntime()
+    let setup = ModelSetup(
+      root: root, manifest: fixtureManifest, replacements: [next], transfer: transfer,
+      runtime: runtime)
+    await setup.restore()
+    let operation = Task { await setup.replace(revision: "test-v2", consent: true) }
+    await transfer.waitForStart()
+    #expect(setup.state == .ready)
+    #expect(await runtime.loadedRevision == "test-v1")
+    await setup.pause()
+    await operation.value
+    #expect(setup.state == .ready)
+    #expect(setup.activity == .paused)
+    let resumed = ModelSetup(
+      root: root, manifest: fixtureManifest, replacements: [next], transfer: transfer,
+      runtime: runtime)
+    await resumed.restore()
+    #expect(resumed.activeManifest?.revision == "test-v1")
+    await resumed.replace(revision: "test-v2", consent: true)
+    #expect(await transfer.usedResume)
+    #expect(resumed.activeManifest?.revision == "test-v2")
+
+    let third = ModelManifest(
+      id: "fixture", revision: "test-v3", name: "Fixture 3", files: fixtureManifest.files)
+    let cancelledTransfer = InterruptibleTransfer()
+    let cancelled = ModelSetup(
+      root: root, manifest: fixtureManifest, replacements: [next, third],
+      transfer: cancelledTransfer, runtime: runtime)
+    await cancelled.restore()
+    let second = Task { await cancelled.replace(revision: "test-v3", consent: true) }
+    await cancelledTransfer.waitForStart()
+    await cancelled.cancel()
+    await second.value
+    #expect(cancelled.state == .ready)
+    #expect(cancelled.activity == .cancelled)
+    #expect(cancelled.activeManifest?.revision == "test-v2")
+    #expect(await runtime.loadedRevision == "test-v2")
+    #expect(await cancelledTransfer.writing == false)
+    #expect(cancelled.partialBytes == 0)
+    #expect(
+      !FileManager.default.fileExists(atPath: root.appendingPathComponent("test-v3.partial").path))
+  }
+
+  @Test(arguments: ["space", "transfer", "integrity", "activation", "selection"])
+  func failedReplacementPreservesWorkingReadinessAndFiles(failure: String) async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let next = ModelManifest(
+      id: "fixture", revision: "test-v2", name: "Fixture 2", files: fixtureManifest.files)
+    let original = ModelSetup(
+      root: root, manifest: fixtureManifest, transfer: ControlledTransfer(),
+      runtime: ControlledRuntime())
+    await original.download(consent: true)
+    let runtime = ControlledRuntime(failedRevision: failure == "activation" ? "test-v2" : nil)
+    let transfer = ControlledTransfer(failure: failure)
+    let setup = ModelSetup(
+      root: root, manifest: fixtureManifest, replacements: [next], transfer: transfer,
+      runtime: runtime, availableSpace: { _ in failure == "space" ? 0 : Int64.max })
+    await setup.restore()
+    if failure == "selection" {
+      let selection = root.appendingPathComponent("active-revision")
+      try FileManager.default.removeItem(at: selection)
+      try FileManager.default.createDirectory(at: selection, withIntermediateDirectories: false)
+    }
+    await setup.replace(revision: next.revision, consent: true)
+    #expect(setup.state == .ready)
+    #expect(setup.activeManifest?.revision == "test-v1")
+    #expect(await runtime.loadedRevision == "test-v1")
+    #expect(await runtime.unloads == 1)
+    guard case .failed = setup.activity else {
+      Issue.record("Replacement must report its failure separately from readiness")
+      return
+    }
+    #expect(
+      try String(contentsOf: root.appendingPathComponent("test-v1/config.json"), encoding: .utf8)
+        == "abc")
+    if failure == "selection" { return }
+    let reopened = ModelSetup(
+      root: root, manifest: fixtureManifest, replacements: [next], transfer: transfer,
+      runtime: ControlledRuntime())
+    await reopened.restore()
+    #expect(reopened.activeManifest?.revision == "test-v1")
+  }
+
+  @Test func replacementRequiresConsentAndKeepsWorkingModelUntilActivation() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let next = ModelManifest(
+      id: "fixture", revision: "test-v2", name: "Fixture 2", files: fixtureManifest.files)
+    let runtime = ControlledRuntime()
+    let transfer = ControlledTransfer()
+    let setup = ModelSetup(
+      root: root, manifest: fixtureManifest, replacements: [next], transfer: transfer,
+      runtime: runtime)
+    await setup.download(consent: true)
+    await setup.replace(revision: next.revision, consent: false)
+    #expect(setup.activeManifest?.revision == "test-v1")
+    #expect(await transfer.requests == 1)
+    await setup.replace(revision: next.revision, consent: true)
+    #expect(setup.state == .ready)
+    #expect(setup.activeManifest?.revision == "test-v2")
+    #expect(setup.installedModels.map(\.bytes) == [3, 3])
+    #expect(await runtime.unloads == 1)
+    let reopened = ModelSetup(
+      root: root, manifest: fixtureManifest, replacements: [next], transfer: transfer,
+      runtime: runtime)
+    await reopened.restore()
+    #expect(reopened.activeManifest?.revision == "test-v2")
+    await reopened.remove(revision: "test-v1", consent: false)
+    #expect(reopened.installedModels.count == 2)
+    await reopened.remove(revision: "test-v1", consent: true)
+    #expect(reopened.state == .ready)
+    await reopened.remove(revision: "test-v2", consent: true)
+    #expect(reopened.state == .awaitingConsent)
+    #expect(reopened.activeManifest == nil)
+    #expect(reopened.installedModels.isEmpty)
+  }
+
   @Test func unavailableMetalDeviceCannotTriggerAnUnusableDownload() async throws {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: root) }
@@ -74,7 +203,10 @@ struct ModelSetupTests {
     await second.value
     #expect(cancelled.state == .cancelled)
     #expect(await cancelledTransfer.writing == false)
-    #expect(try FileManager.default.contentsOfDirectory(atPath: root.path).isEmpty)
+    #expect(
+      try !FileManager.default.contentsOfDirectory(atPath: root.path).contains {
+        $0.hasSuffix(".partial")
+      })
   }
 
   @Test func verifiedFilesStillNeedSuccessfulOfflineLoadBeforeReadiness() async throws {
@@ -135,21 +267,38 @@ private let fixtureManifest = ModelManifest(
 
 private actor ControlledTransfer: ModelTransfer {
   private(set) var requests = 0
+  let failure: String
+  init(failure: String = "") { self.failure = failure }
   func download(_ file: ModelFile, to destination: URL, resumeFile: URL) async throws {
     requests += 1
-    try Data("abc".utf8).write(to: destination)
+    if failure == "transfer" { throw URLError(.networkConnectionLost) }
+    try Data((failure == "integrity" ? "bad" : "abc").utf8).write(to: destination)
   }
 }
 
 private actor ControlledRuntime: LocalModelRuntime {
   private(set) var loads = 0
+  private(set) var unloads = 0
+  private(set) var loadedRevision: String?
   let fail: Bool
-  init(fail: Bool = false) { self.fail = fail }
-  func loadAndCheck(directory: URL) async throws {
-    loads += 1
-    if fail { throw CocoaError(.fileReadCorruptFile) }
+  let failedRevision: String?
+  init(fail: Bool = false, failedRevision: String? = nil) {
+    self.fail = fail
+    self.failedRevision = failedRevision
   }
-  func unload() async {}
+  func loadAndCheck(directory: URL, commit: @Sendable () throws -> Void) async throws {
+    loads += 1
+    if fail || directory.lastPathComponent == failedRevision {
+      throw CocoaError(.fileReadCorruptFile)
+    }
+    try Task.checkCancellation()
+    try commit()
+    loadedRevision = directory.lastPathComponent
+  }
+  func unload() async {
+    unloads += 1
+    loadedRevision = nil
+  }
 }
 
 private actor InterruptibleTransfer: ModelTransfer {
