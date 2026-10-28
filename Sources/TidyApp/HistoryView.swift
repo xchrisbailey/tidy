@@ -6,6 +6,7 @@ struct HistoryView: View {
   let coordinator: TaskCoordinator
   @Environment(\.scenePhase) private var scenePhase
   @State private var snapshot: HistorySnapshot?
+  @State private var recovery: [RecoveryOperation] = []
   @State private var errorMessage: String?
   @State private var isWorking = false
   @State private var confirmsClear = false
@@ -22,6 +23,8 @@ struct HistoryView: View {
       Text(
         "Recovery records are kept on this Mac until you explicitly clear them. They contain paths and recovery information, not document excerpts. History is not a backup."
       )
+      Text(
+        "Reopening checks actual file identities. Interrupted changes never resume automatically.")
       if let snapshot {
         Text(
           "Recovery records: \(ByteCountFormatter.string(fromByteCount: snapshot.recordBytes, countStyle: .file)) (\(snapshot.recordBytes) bytes)"
@@ -40,16 +43,26 @@ struct HistoryView: View {
                     Text("Task \(task.id.uuidString)").font(.headline)
                     Spacer()
                     Button("Undo Task") { undo(task.id, fileOnly: false) }
-                      .disabled(!task.operations.contains { $0.canAttemptUndo })
+                      .disabled(!task.operations.contains { canUndo($0.id) })
                   }
                   Text("\(task.operations.count) recorded files")
                   ForEach(task.operations) { entry in
                     VStack(alignment: .leading, spacing: 4) {
-                      Text(entry.historyOutcome)
+                      if let report = recovery.first(where: { $0.id == entry.id }) {
+                        Text(report.status.rawValue.capitalized)
+                        Text(report.explanation)
+                      } else {
+                        Text(entry.historyOutcome)
+                      }
                       Text("Original: \(entry.originalPath)")
                       Text("Resulting: \(entry.resultingPath)")
                       Button("Undo File") { undo(entry.id, fileOnly: true) }
-                        .disabled(!entry.canAttemptUndo)
+                        .disabled(!canUndo(entry.id))
+                      if recovery.first(where: { $0.id == entry.id })?.options.contains(
+                        .cleanupFolders) == true
+                      {
+                        Button("Clean Up Empty Task Folders") { undo(entry.id, fileOnly: true) }
+                      }
                     }
                   }
                   Divider()
@@ -90,6 +103,10 @@ struct HistoryView: View {
 
   private func refresh() { perform {} }
 
+  private func canUndo(_ id: UUID) -> Bool {
+    recovery.first(where: { $0.id == id })?.options.contains(.undoFile) == true
+  }
+
   private func undo(_ id: UUID, fileOnly: Bool) {
     perform {
       if fileOnly { try await coordinator.undoFile(id) } else { try await coordinator.undoTask(id) }
@@ -119,8 +136,12 @@ struct HistoryView: View {
     Task {
       defer { isWorking = false }
       do { try await action() } catch { errorMessage = error.localizedDescription }
-      do { snapshot = try await coordinator.historySnapshot() } catch {
+      do {
+        recovery = try await coordinator.recoveryReport()
+        snapshot = try await coordinator.historySnapshot()
+      } catch {
         snapshot = nil
+        recovery = []
         errorMessage = error.localizedDescription
       }
     }
@@ -128,8 +149,6 @@ struct HistoryView: View {
 }
 
 extension FileOperation {
-  fileprivate var canAttemptUndo: Bool { state != .undone && state != .notApplied }
-
   fileprivate var historyOutcome: String {
     switch state {
     case .intent: "Interrupted or incomplete — identity check required"

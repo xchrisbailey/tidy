@@ -66,10 +66,12 @@ extension TaskCoordinator {
       rootIdentity: root.identity, fileIdentity: FileIdentity(source))
     entries.append(entry)
     try journal.save(entries)
+    try operationCheckpoint(.intentSaved)
     if existingDestination == nil {
       guard mkdirat(root.fd, destination, 0o755) == 0,
         let created = entryInfo(root.fd, destination)
       else { throw SortError.conflict }
+      try operationCheckpoint(.folderCreated)
       entry.createdFolder = FileIdentity(created)
       entries[entries.count - 1] = entry
       try journal.save(entries)
@@ -89,13 +91,16 @@ extension TaskCoordinator {
     guard let current = entryInfo(root.fd, item.name), FileIdentity(current) == entry.fileIdentity,
       FileSnapshot(current) == item.snapshot
     else { throw SortError.staleSource }
+    try operationCheckpoint(.beforeMove)
     try moveExclusive(root.fd, item.name, directory)
+    try operationCheckpoint(.afterMove)
     guard entryInfo(directory, item.name).map(FileIdentity.init) == entry.fileIdentity else {
       throw SortError.uncertainIdentity
     }
     entry.state = .completed
     entries[entries.count - 1] = entry
     try journal.save(entries)
+    try operationCheckpoint(.completionSaved)
     selectedInventory = nil
     return entry
   }
@@ -128,6 +133,8 @@ extension TaskCoordinator {
         if firstError == nil { firstError = SortError.conflict }
       } catch SortError.uncertainIdentity {
         if firstError == nil { firstError = SortError.uncertainIdentity }
+      } catch SortError.newerOperation {
+        if firstError == nil { firstError = SortError.newerOperation }
       }
     }
     if let firstError { throw firstError }
@@ -155,6 +162,7 @@ extension TaskCoordinator {
       cleanupFolder(entry, root: root)
       return
     }
+    guard newerOperation(after: index, in: entries) == nil else { throw SortError.newerOperation }
     guard let folder = try checkedEntryInfo(root.fd, entry.destinationFolder),
       folder.st_mode & S_IFMT == S_IFDIR, FileIdentity(folder) == entry.destinationIdentity
     else { throw SortError.uncertainIdentity }
@@ -177,15 +185,18 @@ extension TaskCoordinator {
     entry.state = .undoIntent
     entries[index] = entry
     try journal.save(entries)
+    try operationCheckpoint(.undoIntentSaved)
     guard entryInfo(directory, entry.destinationName).map(FileIdentity.init) == entry.fileIdentity
     else { throw SortError.uncertainIdentity }
     try moveExclusive(directory, entry.destinationName, root.fd, as: entry.originalName)
+    try operationCheckpoint(.afterUndoMove)
     guard entryInfo(root.fd, entry.originalName).map(FileIdentity.init) == entry.fileIdentity else {
       throw SortError.uncertainIdentity
     }
     entry.state = .undone
     entries[index] = entry
     try journal.save(entries)
+    try operationCheckpoint(.undoCompletionSaved)
     for previous in entries
     where previous.rootIdentity == root.identity
       && (previous.state == .undone || previous.state == .notApplied)
@@ -204,49 +215,26 @@ extension TaskCoordinator {
     }
   }
 
-  private func reconcile(
+  func reconcile(
     _ entries: inout [FileOperation], root: ScopedDirectory,
     journal: OperationJournal
   ) throws {
     var changed = false
-    for index in entries.indices where entries[index].rootIdentity == root.identity {
+    for index in entries.indices.reversed() where entries[index].rootIdentity == root.identity {
       let entry = entries[index]
       guard entry.state == .intent || entry.state == .undoIntent else { continue }
-      let original = try checkedEntryInfo(root.fd, entry.originalName).map(FileIdentity.init)
-      let folderInfo = try checkedEntryInfo(root.fd, entry.destinationFolder)
-      let directory: Int32?
-      if let folderInfo {
-        guard folderInfo.st_mode & S_IFMT == S_IFDIR else { continue }
-        directory = try childDirectory(root.fd, entry.destinationFolder)
-      } else {
-        directory = nil
-      }
-      let resulting: FileIdentity?
-      if let directory {
-        defer { close(directory) }
-        resulting = try checkedEntryInfo(directory, entry.destinationName).map(FileIdentity.init)
-      } else {
-        resulting = nil
-      }
-      if original == nil, resulting == entry.fileIdentity,
-        entryInfo(root.fd, entry.destinationFolder).map(FileIdentity.init)
-          == entry.destinationIdentity
-      {
+      guard newerOperation(after: index, in: entries) == nil else { continue }
+      let actual = try? observedOperation(entry, root: root)
+      if actual == .completed {
         entries[index].state = .completed
         changed = true
-      } else if original == entry.fileIdentity, resulting == nil {
+      } else if actual == .notApplied {
         entries[index].state = entry.state == .undoIntent ? .undone : .notApplied
         changed = true
       }
       // Ambiguous interruptions remain intents. Neither a filename nor absence proves identity.
     }
     if changed { try journal.save(entries) }
-    for entry in entries
-    where entry.rootIdentity == root.identity
-      && (entry.state == .undone || entry.state == .notApplied)
-    {
-      cleanupFolder(entry, root: root)
-    }
   }
 
   func destinationFolder(for name: String) -> String? {

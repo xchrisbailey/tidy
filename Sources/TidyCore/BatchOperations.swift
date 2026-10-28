@@ -280,10 +280,12 @@ extension TaskCoordinator {
     entries.append(entry)
     let index = entries.count - 1
     try journal.save(entries)
+    try operationCheckpoint(.intentSaved)
     if existing == nil {
       guard mkdirat(root.fd, change.destinationFolder, 0o755) == 0,
         let created = entryInfo(root.fd, change.destinationFolder)
       else { throw SortError.conflict }
+      try operationCheckpoint(.folderCreated)
       entry.createdFolder = FileIdentity(created)
       createdFolders[change.destinationFolder] = entry.createdFolder
       entries[index] = entry
@@ -308,12 +310,15 @@ extension TaskCoordinator {
       try journal.save(entries)
       throw SortError.staleSource
     }
+    try operationCheckpoint(.beforeMove)
     try moveExclusive(root.fd, change.originalName, directory, as: change.destinationName)
+    try operationCheckpoint(.afterMove)
     guard entryInfo(directory, change.destinationName).map(FileIdentity.init) == entry.fileIdentity
     else { throw SortError.uncertainIdentity }
     entry.state = .completed
     entries[index] = entry
     try journal.save(entries)
+    try operationCheckpoint(.completionSaved)
     return entry
   }
 
