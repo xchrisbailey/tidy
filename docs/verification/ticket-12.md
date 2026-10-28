@@ -38,6 +38,8 @@ Observed on the existing M4 Max / 36 GB machine:
 
 Initial local checks: `swift test` passed 11 model tests (five failure cases and two real-HTTP resume modes) plus 21 core tests; the existing native File Provider placeholder test was skipped. `bash scripts/lint.sh` and `git diff --check` passed. Upstream's existing resource-bundle mutated-node warning remains.
 
+Merged integration tip `dc9486f` (including #4 batch work) with merge commit `90e62d8`. Post-merge `swift test` passed 11 model tests and 31 core tests (the same existing native placeholder gate skipped), lint and diff checks passed, and `bash scripts/build-app.sh` produced the sandboxed arm64 application with bundled Metal resources and successful ad-hoc signing/strict verification. No main-task/batch code was changed by #12.
+
 ## Remaining gates
 
 - Native GUI unavailable: manually verify storage menu/window, dialogs, keyboard/accessibility behavior, visible readiness while replacing, pause/resume, cancellation, removal, and relaunch in the packaged app.
