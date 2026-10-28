@@ -3,6 +3,43 @@ import Testing
 import TidyCore
 
 struct NaturalLanguageTests {
+  @Test func successiveModelRenameAndSortRequireNewestUndoFirst() async throws {
+    let fixture = try LanguageFixture()
+    defer { fixture.remove() }
+    try fixture.write("Invoice 2026-10-28 AB123.TXT")
+    let coordinator = TaskCoordinator(bookmarkFile: fixture.bookmark)
+    _ = try await coordinator.selectFolderForWriting(fixture.folder)
+    let rename = try await coordinator.planTask(
+      request: "Rename files replacing spaces with hyphens",
+      model: { _, _, _ in
+        #"{"status":"plan","message":"","files":[{"sourceID":"f0","disposition":"change","folder":".","name":"Invoice-2026-10-28-AB123.TXT"}]}"#
+      })
+    guard case .plan(let first) = rename else {
+      Issue.record("Expected rename")
+      return
+    }
+    _ = try await coordinator.execute(first)
+    _ = try await coordinator.restoreFolder()
+    let sort = try await coordinator.planTask(
+      request: "Sort by type",
+      model: { _, _, _ in
+        #"{"status":"plan","message":"","files":[{"sourceID":"f0","disposition":"change","folder":"Documents","name":"Invoice-2026-10-28-AB123.TXT"}]}"#
+      })
+    guard case .plan(let second) = sort else {
+      Issue.record("Expected sort")
+      return
+    }
+    _ = try await coordinator.execute(second)
+    let reopened = TaskCoordinator(bookmarkFile: fixture.bookmark)
+    await #expect(throws: SortError.newerOperation) { try await reopened.undoTask(first.id) }
+    try await reopened.undoTask(second.id)
+    try await reopened.undoTask(first.id)
+    #expect(
+      try String(
+        contentsOf: fixture.folder.appendingPathComponent("Invoice 2026-10-28 AB123.TXT"),
+        encoding: .utf8) == "fixture")
+  }
+
   @Test func modelPlanRetainsLargeTaskConfirmationAndCancellation() async throws {
     let fixture = try LanguageFixture()
     defer { fixture.remove() }

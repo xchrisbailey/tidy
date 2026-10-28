@@ -150,6 +150,43 @@ struct ModelSmoke {
       "Offline TaskCoordinator metadata task passed: 2 changes, 1 abstention, reopened undo verified; seconds: \(start.duration(to: .now))"
     )
     await reportMetrics(runtime)
+    _ = try await coordinator.restoreFolder()
+    let renameOutcome = try await coordinator.planTask(
+      request: "Rename files replacing spaces with hyphens"
+    ) { system, user, limit in
+      try await runtime.completeJSON(system: system, user: user, maximumOutputTokens: limit)
+    }
+    guard case .plan(let renamePlan) = renameOutcome else {
+      throw LocalInferenceError.smokeCheckFailed
+    }
+    let renamed = try await coordinator.execute(renamePlan)
+    guard renamed.changed.count == 2, renamed.unchanged.count == 1, renamePlan.moveCount == 0 else {
+      throw LocalInferenceError.smokeCheckFailed
+    }
+    _ = try await coordinator.restoreFolder()
+    let sortOutcome = try await coordinator.planTask(request: "Sort by type") {
+      system, user, limit in
+      try await runtime.completeJSON(system: system, user: user, maximumOutputTokens: limit)
+    }
+    guard case .plan(let sortPlan) = sortOutcome else { throw LocalInferenceError.smokeCheckFailed }
+    let sorted = try await coordinator.execute(sortPlan)
+    guard sorted.changed.count == 2 else { throw LocalInferenceError.smokeCheckFailed }
+    let chainReopened = TaskCoordinator(bookmarkFile: bookmark)
+    do {
+      try await chainReopened.undoTask(renamePlan.id)
+      throw LocalInferenceError.smokeCheckFailed
+    } catch SortError.newerOperation {}
+    try await chainReopened.undoTask(sortPlan.id)
+    try await chainReopened.undoTask(renamePlan.id)
+    for name in names {
+      guard
+        try String(contentsOf: folder.appendingPathComponent(name), encoding: .utf8)
+          == "non-sensitive qualification fixture"
+      else { throw LocalInferenceError.smokeCheckFailed }
+    }
+    print(
+      "Real-model rename then sort chain passed: newest-first reopened undo and original bytes verified"
+    )
     for index in 0..<300 {
       try Data("non-sensitive bound fixture".utf8).write(
         to: folder.appendingPathComponent(

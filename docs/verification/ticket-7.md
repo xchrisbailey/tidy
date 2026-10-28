@@ -67,7 +67,8 @@ the public model-completion boundary controlled:
 Supplemental coverage includes eight malformed/unauthorized response cases,
 valid replacement, clarification before inference and from the model, 101-file
 model-plan confirmation, cancellation retaining one completed rename and undo,
-and inference-time cancellation/busy exclusion. Existing executor/inventory,
+inference-time cancellation/busy exclusion, and a model-driven rename→sort chain
+that blocks older undo until newer task undo succeeds after reopening. Existing executor/inventory,
 history, collision, stale-source, provider and setup tests remain in the suite.
 
 ## Actual offline native task
@@ -119,4 +120,35 @@ network denial, **not** NSOpenPanel or final sandboxed GUI qualification.
 - Small real-model corpus only; broader planning quality, output exhaustion,
   full-context/pressure behavior, macOS 14 and low-memory hardware remain open.
 
-Final integrated test/lint/build evidence is appended after merging integration.
+## Integrated checks
+
+Merged #12 through `23d4574` in `1a1f54a`, then merged integration through #5's
+`b319032`. `ModelSetup.state` remains the sole readiness API; no runtime conformer
+or duplicate lifecycle was introduced. #5 recovery remains unchanged apart from
+the narrow root-sentinel journal allowlist addition described above.
+
+- `swift test --disable-automatic-resolution`: 11 model tests and 47 executed core
+  tests passed (48 reported core tests, one existing native provider fixture
+  skipped). Nine natural-language coordinator tests include eight parameterized
+  unauthorized-output cases. The integrated rename→sort chain/newest-first undo
+  and cancellation tests passed.
+- `bash scripts/lint.sh`: passed strict Swift formatting, all three packaging
+  plists and shell syntax. `git diff --check`: passed.
+- Final `bash scripts/model-smoke.sh` after #5/#12 integration passed with network
+  denied and no download: verified load 1.876 s; first complete metadata task
+  2.327 s (232 prompt / 149 output tokens, 0.106 s prefill / 2.256 s generation).
+  The additional **real-model** rename→sort chain also passed: older task undo
+  was blocked, newer then older undo restored all original names and bytes after
+  coordinator reopen. This is application-boundary/diagnostic-bundle evidence,
+  not native GUI interaction. Native cancellation drained in 0.028 s; inference
+  after cancellation and #12's retained-container replacement checks passed.
+- Final `bash scripts/build-app.sh` passed: sandboxed arm64 app, bundled Metal
+  resources, ad-hoc signing and strict signature verification. The app was not
+  launched or interacted with through native GUI tools.
+- A real oversized metadata inventory (303 eligible synthetic files) reached the
+  native context check and threw `LocalInferenceError.contextLimit`, with no
+  partial plan, new history or mutations. The main task adapter explains context
+  and output limits as a request to narrow scope rather than accepting a prefix.
+- Dependency resolution was allowed during builds; offline denial applies only
+  to the actual diagnostic task process. No approval blocker occurred. The
+  existing upstream resource-bundle mutated-node warning remains nonfatal.
