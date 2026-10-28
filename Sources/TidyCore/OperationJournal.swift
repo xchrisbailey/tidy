@@ -62,6 +62,7 @@ public enum SortError: Error, LocalizedError, Equatable {
   case writeGrantRequired, unsupportedRequest, oneFileRequired, staleSource, conflict
   case uncertainIdentity, unavailable, journalUnavailable, busy
   case scopeTooLarge, confirmationRequired, invalidPlan
+  case newerOperation
 
   public var errorDescription: String? {
     switch self {
@@ -85,6 +86,8 @@ public enum SortError: Error, LocalizedError, Equatable {
     case .confirmationRequired:
       "Confirm the rename and move counts before changing more than 100 files."
     case .invalidPlan: "The plan is invalid or belongs to another folder. No files were changed."
+    case .newerOperation:
+      "A newer recorded change to this file blocks undo. Undo that newer task or file first; Tidy did not undo another task."
     }
   }
 }

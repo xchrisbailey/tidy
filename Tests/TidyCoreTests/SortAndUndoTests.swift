@@ -133,6 +133,8 @@ struct SortAndUndoTests {
     try fixture.persistInterrupted(result, state: "undoIntent")
     let reopened = TaskCoordinator(bookmarkFile: fixture.bookmark)
     #expect(try await reopened.undoHistory().first?.state == .undone)
+    // Reopening only reconciles records; explicit undo authorizes empty-folder cleanup.
+    try await reopened.undoFile(result.id)
     #expect(
       !FileManager.default.fileExists(atPath: fixture.sorted.deletingLastPathComponent().path))
     #expect(try Data(contentsOf: fixture.source) == Data("keep".utf8))

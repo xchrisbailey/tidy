@@ -44,9 +44,14 @@ public actor TaskCoordinator {
   var selectedInventory: FolderInventory?
   var selectedRootIdentity: FileIdentity?
   var activeTask = false
+  let operationCheckpoint: @Sendable (OperationCheckpoint) throws -> Void
 
-  public init(bookmarkFile: URL) {
+  public init(
+    bookmarkFile: URL,
+    operationCheckpoint: @escaping @Sendable (OperationCheckpoint) throws -> Void = { _ in }
+  ) {
     self.bookmarkFile = bookmarkFile
+    self.operationCheckpoint = operationCheckpoint
   }
 
   public func restoreFolder() throws -> FolderInventory? {
