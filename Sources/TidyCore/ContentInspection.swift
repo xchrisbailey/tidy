@@ -15,15 +15,15 @@ public enum InspectionCode: String, Error, Sendable {
 
   var explanation: String {
     switch self {
-    case .unsupported: "Unsupported contents were not opened; left unchanged."
+    case .unsupported: "Unsupported or protected contents were not used for naming; left unchanged."
     case .unavailable: "Local contents unavailable; left unchanged."
     case .changed: "File changed since selection; contents not accepted. Left unchanged."
-    case .inputLimit: "Text inspection size limit exceeded; left unchanged."
+    case .inputLimit: "Content inspection size limit exceeded; left unchanged."
     case .taskLimit: "Aggregate content inspection budget exhausted; left unchanged."
     case .modelLimit: "Evidence exceeds local model limits; left unchanged. Narrow the request."
-    case .unreadable: "Contents are not supported UTF-8 plain text; left unchanged."
+    case .unreadable: "Contents could not be read in a supported format; left unchanged."
     case .insufficient: "Insufficient readable evidence for a reliable name; left unchanged."
-    case .deadline: "Cooperative content inspection deadline exceeded; left unchanged."
+    case .deadline: "Content inspection deadline exceeded; left unchanged."
     }
   }
 }
@@ -31,12 +31,32 @@ public enum InspectionCode: String, Error, Sendable {
 struct InspectionBudget {
   static let fileBytes = 16_384
   var remainingBytes = 65_536
+  var remainingPDFBytes = 40 * 1024 * 1024
+  var remainingEvidenceBytes = 65_536
   var remainingTime: Duration = .seconds(5)
 }
 
 func inspectContents(
   _ item: InventoryItem, root: ScopedDirectory, budget: inout InspectionBudget
 ) throws -> InspectionEvidence {
+  if URL(fileURLWithPath: item.name).pathExtension.lowercased() == "pdf" {
+    // Preserve the text aggregate allowance separately from compressed native-document inputs.
+    var nativeBudget = InspectionBudget()
+    nativeBudget.remainingBytes = budget.remainingPDFBytes
+    nativeBudget.remainingTime = budget.remainingTime
+    defer {
+      budget.remainingPDFBytes = nativeBudget.remainingBytes
+      budget.remainingTime = nativeBudget.remainingTime
+    }
+    let data = try readInspectionInput(
+      item, root: root, budget: &nativeBudget, maximumBytes: 20 * 1024 * 1024)
+    let evidence = try inspectNativePDF(data, budget: &nativeBudget)
+    guard evidence.text.utf8.count <= budget.remainingEvidenceBytes else {
+      throw InspectionCode.taskLimit
+    }
+    budget.remainingEvidenceBytes -= evidence.text.utf8.count
+    return evidence
+  }
   guard ["txt", "md"].contains(URL(fileURLWithPath: item.name).pathExtension.lowercased()) else {
     throw InspectionCode.unsupported
   }
@@ -51,6 +71,8 @@ func inspectContents(
     })
   else { throw InspectionCode.unreadable }
   guard text.filter(\.isLetter).count >= 8 else { throw InspectionCode.insufficient }
+  guard text.utf8.count <= budget.remainingEvidenceBytes else { throw InspectionCode.taskLimit }
+  budget.remainingEvidenceBytes -= text.utf8.count
   return InspectionEvidence(kind: "plainText", text: text, coverage: "wholeFile")
 }
 

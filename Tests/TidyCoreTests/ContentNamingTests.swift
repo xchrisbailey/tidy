@@ -224,7 +224,7 @@ struct ContentNamingTests {
     let fixture = try LanguageFixture()
     defer { fixture.remove() }
     let title = "Acme Invoice AB123 2026-10-28"
-    let name = kind == "unsupported" ? "scan.pdf" : "scan.txt"
+    let name = kind == "unsupported" ? "scan.rtf" : "scan.txt"
     let accepted = ["boundary", "bom"].contains(kind)
     let data: Data
     switch kind {

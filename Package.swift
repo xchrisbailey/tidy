@@ -10,6 +10,7 @@ let package = Package(
     .library(name: "TidyModelRuntime", targets: ["TidyModelRuntime"]),
     .executable(name: "Tidy", targets: ["TidyApp"]),
     .executable(name: "TidyModelSmoke", targets: ["TidyModelSmoke"]),
+    .executable(name: "TidyInspectionHelper", targets: ["TidyInspectionHelper"]),
   ],
   dependencies: [
     .package(url: "https://github.com/ml-explore/mlx-swift-lm", exact: "3.32.3", traits: []),
@@ -18,6 +19,7 @@ let package = Package(
   ],
   targets: [
     .target(name: "TidyCore"),
+    .executableTarget(name: "TidyInspectionHelper"),
     .target(name: "TidyModel"),
     .target(
       name: "TidyModelRuntime",

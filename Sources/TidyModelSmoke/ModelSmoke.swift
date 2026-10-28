@@ -69,6 +69,9 @@ struct ModelSmoke {
     )
     reportMemory("after generation")
     await reportMetrics(runtime)
+    if CommandLine.arguments.contains("--pdf-evidence") {
+      try await pdfNamingSmoke(runtime)
+    }
     try await contentNamingSmoke(runtime)
     try await taskCoordinationSmoke(runtime)
     try await recursiveTaskSmoke(runtime)
