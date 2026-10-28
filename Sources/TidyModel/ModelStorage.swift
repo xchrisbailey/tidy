@@ -17,7 +17,28 @@ public enum ModelStorageError: LocalizedError {
   }
 }
 
+public struct StoredModel: Sendable, Identifiable {
+  public let manifest: ModelManifest
+  public let bytes: Int64
+  public var id: String { manifest.revision }
+}
+
 public enum ModelStorage {
+  static func diskUsage(_ directory: URL) -> Int64 {
+    guard
+      let entries = FileManager.default.enumerator(
+        at: directory, includingPropertiesForKeys: [.fileSizeKey, .isRegularFileKey])
+    else { return 0 }
+    var bytes: Int64 = 0
+    for case let url as URL in entries {
+      if let values = try? url.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey]),
+        values.isRegularFile == true
+      {
+        bytes += Int64(values.fileSize ?? 0)
+      }
+    }
+    return bytes
+  }
   public static func availableSpace(_ directory: URL) throws -> Int64 {
     let values = try directory.resourceValues(forKeys: [
       .volumeAvailableCapacityForImportantUsageKey

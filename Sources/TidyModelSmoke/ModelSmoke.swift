@@ -26,6 +26,27 @@ struct ModelSmoke {
     print("Native verified load + readiness check seconds: \(started.duration(to: .now))")
     reportMemory("loaded")
     await reportMetrics(runtime)
+    // Reuse the approved local qualification artifact, never download another copy.
+    // A native activation/selection failure must leave the original runtime usable.
+    do {
+      try await runtime.loadAndCheck(directory: setup.modelDirectory) {
+        throw CocoaError(.fileWriteNoPermission)
+      }
+      throw LocalInferenceError.smokeCheckFailed
+    } catch let error as CocoaError where error.code == .fileWriteNoPermission {
+      print("Native replacement rejected a failed selection commit")
+    }
+    let preparation = Task {
+      try await runtime.loadAndCheck(directory: setup.modelDirectory)
+    }
+    try await Task.sleep(for: .milliseconds(25))
+    preparation.cancel()
+    do {
+      try await preparation.value
+      throw LocalInferenceError.smokeCheckFailed
+    } catch is CancellationError {
+      print("Native replacement preparation cancelled without unloading the working model")
+    }
     let taskStart = ContinuousClock.now
     let result = try await runtime.completeJSON(
       system:
@@ -68,6 +89,12 @@ struct ModelSmoke {
       user: "Return exactly {\"status\":\"ready\"}.", maximumOutputTokens: 64)
     guard recovered.contains("\"ready\"") else { throw LocalInferenceError.smokeCheckFailed }
     print("Post-cancellation native inference passed")
+    try await runtime.loadAndCheck(directory: setup.modelDirectory)
+    let replaced = try await runtime.completeJSON(
+      system: "Return only JSON.", user: "Return exactly {\"status\":\"ready\"}.",
+      maximumOutputTokens: 64)
+    guard replaced.contains("\"ready\"") else { throw LocalInferenceError.smokeCheckFailed }
+    print("Native verified replacement and subsequent inference passed using the existing artifact")
     await runtime.unload()
   }
 

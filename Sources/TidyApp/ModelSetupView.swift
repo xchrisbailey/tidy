@@ -25,6 +25,10 @@ struct ModelSetupScene: Scene {
     }
     .defaultSize(width: 620, height: 540)
     .commands { ModelSetupCommands() }
+    Window("Local Model Storage", id: "model-storage") {
+      ModelStorageView(setup: ModelServices.shared.setup)
+    }
+    .defaultSize(width: 760, height: 560)
   }
 }
 
@@ -33,6 +37,7 @@ private struct ModelSetupCommands: Commands {
   var body: some Commands {
     CommandGroup(after: .appSettings) {
       Button("Local Model Setup…") { openWindow(id: "local-model") }
+      Button("Local Model Storage…") { openWindow(id: "model-storage") }
     }
   }
 }
@@ -44,7 +49,7 @@ struct ModelSetupView: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 16) {
       Text("Set up the local model").font(.title)
-      Text(setup.manifest.name).font(.headline)
+      Text(setup.activeManifest?.name ?? setup.manifest.name).font(.headline)
       Text("One curated candidate · MLX Swift · Apache-2.0 model · No account required")
         .font(.callout).foregroundStyle(.secondary)
       Text(
@@ -80,7 +85,7 @@ struct ModelSetupView: View {
       )
       .font(.caption).foregroundStyle(.secondary)
       Text(
-        "Weights: mlx-community/Qwen3-4B-Instruct-2507-4bit\nRevision: \(setup.manifest.revision)"
+        "Weights: mlx-community/Qwen3-4B-Instruct-2507-4bit\nRevision: \(setup.activeManifest?.revision ?? setup.manifest.revision)"
       )
       .font(.caption.monospaced()).textSelection(.enabled)
       Spacer(minLength: 0)
