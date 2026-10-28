@@ -10,6 +10,10 @@ public struct FileOperation: Codable, Sendable, Identifiable {
   public let originalName: String
   public let destinationFolder: String
   public let selectedFolderPath: String
+  public internal(set) var batchID: UUID? = nil
+  public internal(set) var resultingName: String? = nil
+  public var taskID: UUID { batchID ?? id }
+  public var destinationName: String { resultingName ?? originalName }
   public internal(set) var state: OperationState
   let rootIdentity: FileIdentity
   let fileIdentity: FileIdentity
@@ -57,6 +61,7 @@ struct FileSnapshot: Sendable, Equatable {
 public enum SortError: Error, LocalizedError, Equatable {
   case writeGrantRequired, unsupportedRequest, oneFileRequired, staleSource, conflict
   case uncertainIdentity, unavailable, journalUnavailable, busy
+  case scopeTooLarge, confirmationRequired, invalidPlan
 
   public var errorDescription: String? {
     switch self {
@@ -76,6 +81,10 @@ public enum SortError: Error, LocalizedError, Equatable {
     case .journalUnavailable:
       "Undo history could not be saved or read. No further file changes were attempted."
     case .busy: "Another task or undo is running. Try again when it finishes."
+    case .scopeTooLarge: "More than 1,000 eligible files. Choose a narrower folder."
+    case .confirmationRequired:
+      "Confirm the rename and move counts before changing more than 100 files."
+    case .invalidPlan: "The plan is invalid or belongs to another folder. No files were changed."
     }
   }
 }
@@ -108,9 +117,8 @@ final class OperationJournal {
       let entries = try JSONDecoder().decode([FileOperation].self, from: Data(contentsOf: file))
       guard
         entries.allSatisfy({ entry in
-          !entry.originalName.isEmpty && !entry.originalName.contains("/")
-            && !entry.originalName.contains("\0")
-            && ![".", ".."].contains(entry.originalName)
+          validFileName(entry.originalName)
+            && validFileName(entry.destinationName)
             && ["Documents", "Images", "Audio", "Video", "Archives"].contains(
               entry.destinationFolder)
         }), Set(entries.map(\.id)).count == entries.count
@@ -208,9 +216,41 @@ func childDirectory(_ parent: Int32, _ name: String) throws -> Int32 {
   return fd
 }
 
-func moveExclusive(_ source: Int32, _ name: String, _ destination: Int32) throws {
-  guard renameatx_np(source, name, destination, name, UInt32(RENAME_EXCL)) == 0 else {
+func moveExclusive(
+  _ source: Int32, _ name: String, _ destination: Int32, as resultingName: String? = nil
+) throws {
+  guard renameatx_np(source, name, destination, resultingName ?? name, UInt32(RENAME_EXCL)) == 0
+  else {
     throw errno == EEXIST ? SortError.conflict : SortError.unavailable
   }
   guard fsync(source) == 0, fsync(destination) == 0 else { throw SortError.unavailable }
+}
+
+func validFileName(_ name: String) -> Bool {
+  !name.isEmpty && name.utf8.count <= Int(NAME_MAX)
+    && !name.contains("/") && !name.contains("\0") && ![".", ".."].contains(name)
+}
+
+func directoryNames(_ directory: Int32) throws -> Set<String> {
+  let copy = dup(directory)
+  guard copy >= 0 else { throw SortError.unavailable }
+  guard let stream = fdopendir(copy) else {
+    close(copy)
+    throw SortError.unavailable
+  }
+  defer { closedir(stream) }
+  var names: Set<String> = []
+  while true {
+    errno = 0
+    guard let entry = readdir(stream) else {
+      guard errno == 0 else { throw SortError.unavailable }
+      return names
+    }
+    let name = withUnsafePointer(to: &entry.pointee.d_name) { pointer in
+      pointer.withMemoryRebound(to: CChar.self, capacity: Int(MAXNAMLEN) + 1) {
+        String(cString: $0)
+      }
+    }
+    names.insert(name.lowercased())
+  }
 }

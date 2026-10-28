@@ -20,7 +20,7 @@ extension TaskCoordinator {
     return inventory
   }
 
-  private func writableFolder() throws -> ScopedDirectory {
+  func writableFolder() throws -> ScopedDirectory {
     do {
       let grant = try JSONDecoder().decode(WriteGrant.self, from: Data(contentsOf: writeGrantFile))
       var stale = false
@@ -36,6 +36,7 @@ extension TaskCoordinator {
   }
 
   public func sortByType(request: String) throws -> FileOperation {
+    guard !activeTask else { throw SortError.busy }
     try Task.checkCancellation()
     guard request.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "sort by type"
     else { throw SortError.unsupportedRequest }
@@ -100,6 +101,7 @@ extension TaskCoordinator {
   }
 
   public func undoHistory() throws -> [FileOperation] {
+    guard !activeTask else { throw SortError.busy }
     let journal = try OperationJournal(directory: bookmarkFile.deletingLastPathComponent())
     var entries = try journal.load()
     if let root = try? writableFolder() {
@@ -109,16 +111,42 @@ extension TaskCoordinator {
   }
 
   public func undoTask(_ taskID: UUID) throws {
-    try undoFile(taskID)
-  }
-
-  // This slice has one operation per task; both undo entry points share the same safety checks.
-  public func undoFile(_ operationID: UUID) throws {
+    guard !activeTask else { throw SortError.busy }
     try Task.checkCancellation()
     let root = try writableFolder()
     let journal = try OperationJournal(directory: bookmarkFile.deletingLastPathComponent())
     var entries = try journal.load()
     try reconcile(&entries, root: root, journal: journal)
+    let operations = entries.filter { $0.taskID == taskID }
+    guard !operations.isEmpty else { throw SortError.uncertainIdentity }
+    var firstError: (any Error)?
+    for entry in operations.reversed() {
+      try Task.checkCancellation()
+      do {
+        try undo(entry.id, root: root, journal: journal, entries: &entries)
+      } catch SortError.conflict {
+        if firstError == nil { firstError = SortError.conflict }
+      } catch SortError.uncertainIdentity {
+        if firstError == nil { firstError = SortError.uncertainIdentity }
+      }
+    }
+    if let firstError { throw firstError }
+  }
+
+  public func undoFile(_ operationID: UUID) throws {
+    guard !activeTask else { throw SortError.busy }
+    try Task.checkCancellation()
+    let root = try writableFolder()
+    let journal = try OperationJournal(directory: bookmarkFile.deletingLastPathComponent())
+    var entries = try journal.load()
+    try reconcile(&entries, root: root, journal: journal)
+    try undo(operationID, root: root, journal: journal, entries: &entries)
+  }
+
+  private func undo(
+    _ operationID: UUID, root: ScopedDirectory, journal: OperationJournal,
+    entries: inout [FileOperation]
+  ) throws {
     guard let index = entries.firstIndex(where: { $0.id == operationID }),
       entries[index].rootIdentity == root.identity
     else { throw SortError.uncertainIdentity }
@@ -139,26 +167,31 @@ extension TaskCoordinator {
       entryInfo(root.fd, entry.destinationFolder).map(FileIdentity.init)
         == entry.destinationIdentity
     else { throw SortError.uncertainIdentity }
-    guard let file = entryInfo(directory, entry.originalName),
+    guard let file = entryInfo(directory, entry.destinationName),
       FileIdentity(file) == entry.fileIdentity, file.st_mode & S_IFMT == S_IFREG,
       file.st_nlink == 1
     else { throw SortError.uncertainIdentity }
-    let sourceFD = try pinFile(directory, entry.originalName, identity: entry.fileIdentity)
+    let sourceFD = try pinFile(directory, entry.destinationName, identity: entry.fileIdentity)
     defer { close(sourceFD) }
     guard try checkedEntryInfo(root.fd, entry.originalName) == nil else { throw SortError.conflict }
     entry.state = .undoIntent
     entries[index] = entry
     try journal.save(entries)
-    guard entryInfo(directory, entry.originalName).map(FileIdentity.init) == entry.fileIdentity
+    guard entryInfo(directory, entry.destinationName).map(FileIdentity.init) == entry.fileIdentity
     else { throw SortError.uncertainIdentity }
-    try moveExclusive(directory, entry.originalName, root.fd)
+    try moveExclusive(directory, entry.destinationName, root.fd, as: entry.originalName)
     guard entryInfo(root.fd, entry.originalName).map(FileIdentity.init) == entry.fileIdentity else {
       throw SortError.uncertainIdentity
     }
     entry.state = .undone
     entries[index] = entry
     try journal.save(entries)
-    cleanupFolder(entry, root: root)
+    for previous in entries
+    where previous.rootIdentity == root.identity
+      && (previous.state == .undone || previous.state == .notApplied)
+    {
+      cleanupFolder(previous, root: root)
+    }
   }
 
   private func cleanupFolder(_ entry: FileOperation, root: ScopedDirectory) {
@@ -191,7 +224,7 @@ extension TaskCoordinator {
       let resulting: FileIdentity?
       if let directory {
         defer { close(directory) }
-        resulting = try checkedEntryInfo(directory, entry.originalName).map(FileIdentity.init)
+        resulting = try checkedEntryInfo(directory, entry.destinationName).map(FileIdentity.init)
       } else {
         resulting = nil
       }
@@ -216,7 +249,7 @@ extension TaskCoordinator {
     }
   }
 
-  private func destinationFolder(for name: String) -> String? {
+  func destinationFolder(for name: String) -> String? {
     switch URL(fileURLWithPath: name).pathExtension.lowercased() {
     case "txt", "pdf", "md", "rtf", "doc", "docx", "csv": "Documents"
     case "png", "jpg", "jpeg", "gif", "heic", "tiff": "Images"
