@@ -71,6 +71,7 @@ struct ModelSmoke {
     await reportMetrics(runtime)
     try await contentNamingSmoke(runtime)
     try await taskCoordinationSmoke(runtime)
+    try await recursiveTaskSmoke(runtime)
     let cancelled = Task {
       try await runtime.completeJSON(
         system: "Return only a JSON array of integers.",
@@ -110,10 +111,13 @@ struct ModelSmoke {
     let contents = [
       "a.txt":
         "Acme Invoice AB123 2026-10-28\nThis invoice covers professional services provided during October. Payment is due by bank transfer.",
-      "b.txt":
+      "Nested/b.txt":
         "Factura Iberia CD456 2026-10-28\nEsta factura corresponde a los servicios prestados durante el mes de octubre. El pago se realizará mediante transferencia bancaria.",
     ]
     for (name, text) in contents {
+      try FileManager.default.createDirectory(
+        at: folder.appendingPathComponent(name).deletingLastPathComponent(),
+        withIntermediateDirectories: true)
       try Data(text.utf8).write(to: folder.appendingPathComponent(name))
     }
     let data = try folder.bookmarkData(
@@ -128,7 +132,7 @@ struct ModelSmoke {
     _ = try await coordinator.selectFolderForWriting(granted)
     let start = ContinuousClock.now
     let outcome = try await coordinator.planTask(
-      request: "Give files readable names based on their contents"
+      request: "Give files readable names based on their contents including subfolders"
     ) { system, user, limit in
       try await runtime.completeJSON(system: system, user: user, maximumOutputTokens: limit)
     }
@@ -140,7 +144,8 @@ struct ModelSmoke {
           && $0.destinationName.contains("AB123")
       }),
       result.changed.contains(where: {
-        $0.destinationName.contains("Factura") && $0.destinationName.contains("Iberia")
+        $0.destinationFolder == "Nested" && $0.destinationName.contains("Factura")
+          && $0.destinationName.contains("Iberia")
           && $0.destinationName.contains("CD456")
       })
     else { throw LocalInferenceError.smokeCheckFailed }

@@ -8,6 +8,7 @@ public struct InventoryItem: Sendable, Identifiable {
   public let byteCount: Int64?
   public let modificationDate: Date?
   var snapshot: FileSnapshot? = nil
+  var ancestorIdentities: [String: FileIdentity]? = nil
 }
 
 public enum SkipReason: String, Sendable {
@@ -157,9 +158,10 @@ public actor TaskCoordinator {
     }
   }
 
-  private func inspect(_ url: URL) -> InventoryItem {
+  func inspect(_ url: URL, capturedInfo: stat? = nil) -> InventoryItem {
     var info = stat()
-    guard lstat(url.path, &info) == 0 else {
+    if let capturedInfo { info = capturedInfo }
+    guard capturedInfo != nil || lstat(url.path, &info) == 0 else {
       return InventoryItem(
         name: url.lastPathComponent, skipReason: .unavailable,
         byteCount: nil, modificationDate: nil)

@@ -67,7 +67,31 @@ func readInspectionInput(
   let started = ContinuousClock.now
   defer { budget.remainingTime -= started.duration(to: .now) }
   let deadline = started.advanced(by: min(budget.remainingTime, .seconds(1)))
-  guard let before = entryInfo(root.fd, item.name), before.st_mode & S_IFMT == S_IFREG,
+  guard validSourceAuthority(item.name, item.ancestorIdentities) else {
+    throw InspectionCode.changed
+  }
+  let parent: Int32
+  do {
+    try validateAncestors(root.fd, item.ancestorIdentities)
+    parent = try relativeDirectory(root.fd, relativeParent(item.name))
+  } catch { throw InspectionCode.changed }
+  defer { close(parent) }
+  let leaf = relativeLeaf(item.name)
+  let expectedParent =
+    relativeParent(item.name) == "."
+    ? root.identity : item.ancestorIdentities?[relativeParent(item.name)]
+  func recheckAuthority() throws {
+    do { try validateAncestors(root.fd, item.ancestorIdentities) } catch {
+      throw InspectionCode.changed
+    }
+    var parentInfo = stat()
+    guard fstat(parent, &parentInfo) == 0, FileIdentity(parentInfo) == expectedParent,
+      entryInfo(parent, leaf).map(FileSnapshot.init) == item.snapshot,
+      entryInfo(root.fd, item.name).map(FileSnapshot.init) == item.snapshot
+    else { throw InspectionCode.changed }
+  }
+  try recheckAuthority()
+  guard let before = entryInfo(parent, leaf), before.st_mode & S_IFMT == S_IFREG,
     before.st_nlink == 1, before.st_flags & UInt32(SF_DATALESS) == 0,
     FileSnapshot(before) == item.snapshot
   else { throw InspectionCode.changed }
@@ -88,7 +112,8 @@ func readInspectionInput(
   guard before.st_size <= budget.remainingBytes else { throw InspectionCode.taskLimit }
   try Task.checkCancellation()
   guard ContinuousClock.now < deadline else { throw InspectionCode.deadline }
-  let fd = openat(root.fd, item.name, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
+  try recheckAuthority()
+  let fd = openat(parent, leaf, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
   guard fd >= 0 else { throw InspectionCode.unavailable }
   defer { close(fd) }
   var pinned = stat()
@@ -101,6 +126,7 @@ func readInspectionInput(
   while true {
     try Task.checkCancellation()
     guard ContinuousClock.now < deadline else { throw InspectionCode.deadline }
+    try recheckAuthority()
     let count = read(
       fd, &buffer,
       min(
@@ -118,5 +144,6 @@ func readInspectionInput(
   guard fstat(fd, &pinned) == 0, FileSnapshot(pinned) == item.snapshot,
     entryInfo(root.fd, item.name).map(FileSnapshot.init) == item.snapshot
   else { throw InspectionCode.changed }
+  try recheckAuthority()
   return data
 }

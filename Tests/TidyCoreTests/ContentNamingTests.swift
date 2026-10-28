@@ -3,6 +3,71 @@ import Testing
 import TidyCore
 
 struct ContentNamingTests {
+  @Test(arguments: ["normal", "link", "replacedAncestor"])
+  func recursiveContentNamingUsesCapturedAncestorAuthorityAndPreservesParent(kind: String)
+    async throws
+  {
+    let fixture = try LanguageFixture()
+    defer { fixture.remove() }
+    let parent = fixture.folder.appendingPathComponent("Nested/Original")
+    try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
+    let bytes = Data("Acme Invoice AB123 2026-10-28".utf8)
+    try bytes.write(to: parent.appendingPathComponent("scan.txt"))
+    let outside = fixture.root.appendingPathComponent("Outside")
+    try FileManager.default.createDirectory(
+      at: outside.appendingPathComponent("Original"), withIntermediateDirectories: true)
+    try Data("OutsidePrivateCanaryEvidence".utf8).write(
+      to: outside.appendingPathComponent("Original/scan.txt"))
+    let coordinator = TaskCoordinator(bookmarkFile: fixture.bookmark)
+    _ = try await coordinator.selectFolderForWriting(fixture.folder)
+    let request = "Give files readable names from contents including subfolders"
+    let intent = try metadataResponse(
+      request: request, sort: "none",
+      rename: [["kind": "content", "evidence": request, "value": "", "from": ""]])
+    let sequence = ResponseSequence([
+      intent,
+      #"{"files":[{"sourceID":"f0","title":"Acme Invoice AB123 2026-10-28","name":"Acme Invoice AB123 2026-10-28.txt","disposition":"apply"}]}"#,
+    ])
+    let outcome = try await coordinator.planTask(request: request) { _, _, _ in
+      let reply = await sequence.next()
+      if reply == intent && kind != "normal" {
+        let nested = fixture.folder.appendingPathComponent("Nested")
+        let detached = fixture.root.appendingPathComponent("Detached")
+        try FileManager.default.moveItem(at: nested, to: detached)
+        if kind == "link" {
+          try FileManager.default.createSymbolicLink(at: nested, withDestinationURL: outside)
+        } else {
+          try FileManager.default.createDirectory(at: nested, withIntermediateDirectories: false)
+          try FileManager.default.moveItem(
+            at: detached.appendingPathComponent("Original"), to: parent)
+        }
+      }
+      return reply
+    }
+    guard case .plan(let plan) = outcome else {
+      Issue.record("Expected recursive content result")
+      return
+    }
+    if kind == "normal" {
+      #expect(plan.changes.first?.destinationFolder == "Nested/Original")
+      #expect(plan.moveCount == 0)
+      #expect(try await coordinator.execute(plan).changed.count == 1)
+      #expect(
+        try Data(contentsOf: parent.appendingPathComponent("Acme Invoice AB123 2026-10-28.txt"))
+          == bytes)
+      try await TaskCoordinator(bookmarkFile: fixture.bookmark).undoTask(plan.id)
+      #expect(try Data(contentsOf: parent.appendingPathComponent("scan.txt")) == bytes)
+    } else {
+      #expect(plan.changes.isEmpty)
+      #expect(plan.abstained.count == 1)
+      #expect(try await coordinator.execute(plan).changed.isEmpty)
+      #expect(try await coordinator.undoHistory().isEmpty)
+    }
+    #expect(
+      try String(contentsOf: outside.appendingPathComponent("Original/scan.txt"), encoding: .utf8)
+        == "OutsidePrivateCanaryEvidence")
+  }
+
   @Test func unclearSourceLanguageFallsBackToRequestNotAnInterfaceLocale() async throws {
     let fixture = try LanguageFixture()
     defer { fixture.remove() }

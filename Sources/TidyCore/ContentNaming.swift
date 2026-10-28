@@ -49,7 +49,8 @@ extension TaskCoordinator {
       guard
         intent.selection.extensions.isEmpty
           || intent.selection.extensions.contains(where: { $0.lowercased() == ext.lowercased() }),
-        intent.selection.nameContains.isEmpty || item.name.contains(intent.selection.nameContains)
+        intent.selection.nameContains.isEmpty
+          || relativeLeaf(item.name).contains(intent.selection.nameContains)
       else { continue }
       guard intent.files.contains(where: { $0.sourceID == id && $0.disposition == "apply" }) else {
         continue
@@ -69,7 +70,8 @@ extension TaskCoordinator {
         requestedNamingLanguage(rule.value, request: request)
         ?? reliableLanguage(evidence.text) ?? reliableLanguage(request) ?? "und"
       let input = NamingInput(
-        request: request, sourceID: id, originalName: item.name, untrustedEvidence: evidence.text,
+        request: request, sourceID: id, originalName: relativeLeaf(item.name),
+        untrustedEvidence: evidence.text,
         sourceKind: evidence.kind, coverage: evidence.coverage,
         outputLanguage: language,
         supportedTranslations: translatedDescriptors(in: evidence.text, language: language),
