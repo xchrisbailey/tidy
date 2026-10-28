@@ -58,7 +58,7 @@ The fixed, non-sensitive rename returned the exact expected complete JSON operat
 
 The application was packaged with `bash scripts/build-app.sh`; arm64 build, Metal-resource presence check, ad-hoc signing, and strict signature verification passed. The only edit to the merged main app scene is the standalone `ModelSetupScene()` entry. The setup command/window and view are separate from the concurrent task UI implementation.
 
-Final local checks after merging integration commit `eb7e84b`: `swift test` passed (8 model tests, including two resume-mode cases, and 19 core tests); `bash scripts/lint.sh` passed (Swift format, both plists, shell syntax); `git diff --check` passed. `otool -L` showed no dynamic MLX or FoundationModels framework, and `nm -gU` showed one `_mlx_metal_set_metallib_path` definition in the app executable. The Xcode-backed SwiftPM build emits an upstream resource-bundle “missing creator for mutated node” warning but produces the Metal library and runnable native smoke binary.
+Final local checks after merging integration commit `b5d4868`: `swift test` passed (8 model tests, including two resume-mode cases, and 21 core tests); `bash scripts/lint.sh` passed (Swift format, both plists, shell syntax); `git diff --check` passed. Integration's history window and write-grant entitlement were retained alongside model setup. `otool -L` showed no dynamic MLX or FoundationModels framework, and `nm -gU` showed one `_mlx_metal_set_metallib_path` definition in the app executable. The Xcode-backed SwiftPM build emits an upstream resource-bundle “missing creator for mutated node” warning but produces the Metal library and runnable native smoke binary.
 
 ## Remaining gates
 
