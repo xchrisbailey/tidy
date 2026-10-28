@@ -143,6 +143,13 @@ struct MetadataIntent: Codable {
       guard evidence(rule.evidence, effect: "rename") else { throw IntentViolation.rename }
       let words = metadataInstructionText(rule.evidence)
       switch rule.kind {
+      case "content":
+        guard rename.count == 1, rule.from.isEmpty,
+          authorizesContentNaming(rule.evidence),
+          rule.value.isEmpty || requestedNamingLanguage(rule.value, request: request) != nil
+        else {
+          throw IntentViolation.rename
+        }
       case "separator":
         guard [" ", "_", "-"].contains(rule.from), [" ", "_", "-"].contains(rule.value),
           rule.from != rule.value,

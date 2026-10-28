@@ -15,6 +15,19 @@ func strictPlanJSON(_ text: String) -> Bool {
     let files = envelope["files"] as? [[String: Any]],
     files.allSatisfy({ Set($0.keys) == ["sourceID", "disposition"] })
   else { return false }
+  return uniqueJSONKeys(data)
+}
+
+func strictNamingJSON(_ text: String) -> Bool {
+  let data = Data(text.utf8)
+  guard let envelope = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+    Set(envelope.keys) == ["files"], let files = envelope["files"] as? [[String: Any]],
+    files.allSatisfy({ Set($0.keys) == ["sourceID", "title", "name", "disposition"] })
+  else { return false }
+  return uniqueJSONKeys(data)
+}
+
+private func uniqueJSONKeys(_ data: Data) -> Bool {
   // Foundation decoders accept duplicate keys. Reject them before interpreting any model authority.
   let bytes = Array(data)
   var objects: [Set<String>] = []

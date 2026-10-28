@@ -69,6 +69,7 @@ struct ModelSmoke {
     )
     reportMemory("after generation")
     await reportMetrics(runtime)
+    try await contentNamingSmoke(runtime)
     try await taskCoordinationSmoke(runtime)
     let cancelled = Task {
       try await runtime.completeJSON(
@@ -98,6 +99,62 @@ struct ModelSmoke {
     guard replaced.contains("\"ready\"") else { throw LocalInferenceError.smokeCheckFailed }
     print("Native verified replacement and subsequent inference passed using the existing artifact")
     await runtime.unload()
+  }
+
+  static func contentNamingSmoke(_ runtime: MLXLocalModelRuntime) async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+      "tidy-content-\(UUID())")
+    let folder = root.appendingPathComponent("Selected")
+    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let contents = [
+      "a.txt":
+        "Acme Invoice AB123 2026-10-28\nThis invoice covers professional services provided during October. Payment is due by bank transfer.",
+      "b.txt":
+        "Factura Iberia CD456 2026-10-28\nEsta factura corresponde a los servicios prestados durante el mes de octubre. El pago se realizará mediante transferencia bancaria.",
+    ]
+    for (name, text) in contents {
+      try Data(text.utf8).write(to: folder.appendingPathComponent(name))
+    }
+    let data = try folder.bookmarkData(
+      options: [.withSecurityScope], includingResourceValuesForKeys: nil, relativeTo: nil)
+    var stale = false
+    let granted = try URL(
+      resolvingBookmarkData: data, options: [.withSecurityScope, .withoutUI, .withoutMounting],
+      relativeTo: nil, bookmarkDataIsStale: &stale)
+    guard !stale else { throw LocalInferenceError.smokeCheckFailed }
+    let bookmark = root.appendingPathComponent("settings/folder.bookmark")
+    let coordinator = TaskCoordinator(bookmarkFile: bookmark)
+    _ = try await coordinator.selectFolderForWriting(granted)
+    let start = ContinuousClock.now
+    let outcome = try await coordinator.planTask(
+      request: "Give files readable names based on their contents"
+    ) { system, user, limit in
+      try await runtime.completeJSON(system: system, user: user, maximumOutputTokens: limit)
+    }
+    guard case .plan(let plan) = outcome else { throw LocalInferenceError.smokeCheckFailed }
+    let result = try await coordinator.execute(plan)
+    guard result.changed.count == 2, plan.moveCount == 0,
+      result.changed.contains(where: {
+        $0.destinationName.contains("Invoice") && $0.destinationName.contains("Acme")
+          && $0.destinationName.contains("AB123")
+      }),
+      result.changed.contains(where: {
+        $0.destinationName.contains("Factura") && $0.destinationName.contains("Iberia")
+          && $0.destinationName.contains("CD456")
+      })
+    else { throw LocalInferenceError.smokeCheckFailed }
+    try await TaskCoordinator(bookmarkFile: bookmark).undoTask(plan.id)
+    for (name, text) in contents {
+      guard try String(contentsOf: folder.appendingPathComponent(name), encoding: .utf8) == text
+      else {
+        throw LocalInferenceError.smokeCheckFailed
+      }
+    }
+    print(
+      "Offline evidence-based English/Spanish text naming passed: two changes, protected dates/IDs/names, original bytes and reopened undo; seconds: \(start.duration(to: .now))"
+    )
+    await reportMetrics(runtime)
   }
 
   static func taskCoordinationSmoke(_ runtime: MLXLocalModelRuntime) async throws {

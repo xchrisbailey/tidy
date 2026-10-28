@@ -2,7 +2,10 @@ import Darwin
 import Foundation
 
 extension TaskCoordinator {
-  func expandMetadataPlan(_ intent: MetadataIntent, inventory: FolderInventory) throws -> SortPlan {
+  func expandMetadataPlan(
+    _ intent: MetadataIntent, inventory: FolderInventory,
+    contentNames: [String: ContentName] = [:]
+  ) throws -> SortPlan {
     let root = try writableFolder()
     guard selectedRootIdentity == root.identity, inventory.folder == root.url else {
       throw SortError.writeGrantRequired
@@ -32,13 +35,15 @@ extension TaskCoordinator {
       }
       guard decisions["f\(index)"] == "apply",
         let folder = metadataFolder(intent.sort, item: item),
-        let name = metadataName(intent.rename, item: item)
+        let name = intent.rename.contains(where: { $0.kind == "content" })
+          ? contentNames["f\(index)"]?.name : metadataName(intent.rename, item: item)
       else {
         abstained.append(
           FileOutcome(
             name: item.name, reason: .abstained,
             explanation:
-              "Insufficient or ambiguous metadata, or the model abstained. Left untouched."))
+              contentNames["f\(index)"]?.explanation
+              ?? "Insufficient or ambiguous metadata, or the model abstained. Left untouched."))
         continue
       }
       guard validDestinationFolder(folder), validFileName(name), !name.hasPrefix("."),
