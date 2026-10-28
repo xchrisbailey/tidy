@@ -25,6 +25,10 @@ struct ModelSetupScene: Scene {
     }
     .defaultSize(width: 620, height: 540)
     .commands { ModelSetupCommands() }
+    Window("Local Model Storage", id: "model-storage") {
+      ModelStorageView(setup: ModelServices.shared.setup)
+    }
+    .defaultSize(width: 760, height: 560)
   }
 }
 
@@ -33,6 +37,7 @@ private struct ModelSetupCommands: Commands {
   var body: some Commands {
     CommandGroup(after: .appSettings) {
       Button("Local Model Setup…") { openWindow(id: "local-model") }
+      Button("Local Model Storage…") { openWindow(id: "model-storage") }
     }
   }
 }

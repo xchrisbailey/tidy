@@ -75,8 +75,17 @@ extension ModelTransfer {
 }
 
 public protocol LocalModelRuntime: Sendable {
-  func loadAndCheck(directory: URL) async throws
+  /// Commit only after verification/inference succeeds. Failure or cancellation must retain
+  /// the previous working runtime; callers may continue using it during preparation.
+  /// Check cancellation, call commit, then switch without suspension or further throwing work.
+  func loadAndCheck(directory: URL, commit: @Sendable () throws -> Void) async throws
   func unload() async
+}
+
+extension LocalModelRuntime {
+  public func loadAndCheck(directory: URL) async throws {
+    try await loadAndCheck(directory: directory, commit: {})
+  }
 }
 
 public enum ModelSetupState: Equatable, Sendable {
@@ -94,8 +103,14 @@ public enum ModelSetupState: Equatable, Sendable {
 
 @Observable @MainActor
 public final class ModelSetup {
-  public private(set) var state: ModelSetupState
-  public let manifest: ModelManifest
+  public var state: ModelSetupState { activeManifest == nil ? activity : .ready }
+  public private(set) var activity: ModelSetupState
+  public private(set) var activeManifest: ModelManifest?
+  public private(set) var manifest: ModelManifest
+  public let catalog: [ModelManifest]
+  public private(set) var installedModels: [StoredModel] = []
+  public private(set) var partialBytes: Int64 = 0
+  public private(set) var partialModels: [StoredModel] = []
   public let root: URL
   private let hardware: ModelHardware
   private let transfer: any ModelTransfer
@@ -114,27 +129,88 @@ public final class ModelSetup {
   public var requiredFreeBytes: Int64 { manifest.downloadBytes * 3 + 512 * 1024 * 1024 }
 
   public init(
-    root: URL, manifest: ModelManifest, hardware: ModelHardware = .current,
+    root: URL, manifest: ModelManifest, replacements: [ModelManifest] = [],
+    hardware: ModelHardware = .current,
     transfer: any ModelTransfer, runtime: any LocalModelRuntime,
     availableSpace: @escaping @Sendable (URL) throws -> Int64 = ModelStorage.availableSpace
   ) {
     self.root = root
     self.manifest = manifest
+    self.catalog = [manifest] + replacements.filter { $0.revision != manifest.revision }
     self.hardware = hardware
     self.transfer = transfer
     self.runtime = runtime
     self.availableSpace = availableSpace
-    state = hardware.unavailability.map(ModelSetupState.unavailable) ?? .awaitingConsent
+    activity = hardware.unavailability.map(ModelSetupState.unavailable) ?? .awaitingConsent
+    refreshStorage()
   }
 
+  public func refreshStorage() {
+    installedModels = catalog.compactMap { model in
+      guard (try? ModelStorage.validate(model)) != nil else { return nil }
+      let directory = root.appendingPathComponent(model.revision, isDirectory: true)
+      guard FileManager.default.fileExists(atPath: directory.path) else { return nil }
+      return StoredModel(manifest: model, bytes: ModelStorage.diskUsage(directory))
+    }
+    partialModels = catalog.compactMap { model in
+      guard (try? ModelStorage.validate(model)) != nil else { return nil }
+      let directory = root.appendingPathComponent(model.revision + ".partial", isDirectory: true)
+      guard FileManager.default.fileExists(atPath: directory.path) else { return nil }
+      return StoredModel(manifest: model, bytes: ModelStorage.diskUsage(directory))
+    }
+    partialBytes = partialModels.reduce(0) { $0 + $1.bytes }
+  }
+
+  public func replace(revision: String, consent: Bool) async {
+    guard consent, !isBusy, hardware.unavailability == nil,
+      revision != activeManifest?.revision,
+      let candidate = catalog.first(where: { $0.revision == revision })
+    else { return }
+    manifest = candidate
+    await perform(allowDownload: true)
+  }
+
+  public func remove(revision: String, consent: Bool) async {
+    guard consent, !isBusy, let model = catalog.first(where: { $0.revision == revision })
+    else { return }
+    stopping = true
+    defer {
+      stopping = false
+      refreshStorage()
+    }
+    do {
+      try ModelStorage.validate(model)
+      if revision == activeManifest?.revision {
+        activity = .awaitingConsent
+        activeManifest = nil
+        await runtime.unload()
+        try ModelStorage.removeIfPresent(selection)
+      }
+      try ModelStorage.removeIfPresent(root.appendingPathComponent(revision, isDirectory: true))
+    } catch {
+      activity = .failed("Model removal could not finish. Check storage permissions and retry.")
+    }
+  }
+
+  private var selection: URL { root.appendingPathComponent("active-revision") }
+
   public func download(consent: Bool) async {
-    guard hardware.unavailability == nil, consent, !isBusy else { return }
+    guard hardware.unavailability == nil, consent, !isBusy,
+      activeManifest?.revision != manifest.revision
+    else { return }
     await perform(allowDownload: true)
   }
 
   /// Restoring an installation never requests network access and never trusts cached readiness.
   public func restore() async {
     guard hardware.unavailability == nil, !isBusy else { return }
+    activity = .verifying
+    activeManifest = nil
+    if let revision = try? String(contentsOf: selection, encoding: .utf8),
+      let selected = catalog.first(where: { $0.revision == revision })
+    {
+      manifest = selected
+    }
     await perform(allowDownload: false)
   }
 
@@ -143,28 +219,36 @@ public final class ModelSetup {
     stopping = true
     operation.cancel()
     await operation.value
-    await runtime.unload()
+    if activeManifest == nil { await runtime.unload() }
     self.operation = nil
-    state = .paused
+    activity = .paused
     stopping = false
   }
 
-  public func cancel() async {
+  public func cancel(revision: String? = nil) async {
     guard !stopping else { return }
+    if let revision {
+      guard !isBusy, let candidate = catalog.first(where: { $0.revision == revision }) else {
+        return
+      }
+      manifest = candidate
+    }
     stopping = true
     operation?.cancel()
     await operation?.value
-    await runtime.unload()
+    if activeManifest == nil { await runtime.unload() }
     do {
+      try ModelStorage.validate(manifest)
       try await transfer.discardPartials(in: staging)
       try ModelStorage.removeIfPresent(staging)
-      state = .cancelled
+      activity = .cancelled
     } catch {
-      state = .failed(
+      activity = .failed(
         "Cancelled, but partial-file cleanup failed. Retry Cancel before downloading again.")
     }
     operation = nil
     stopping = false
+    refreshStorage()
   }
 
   private func perform(allowDownload: Bool) async {
@@ -176,15 +260,16 @@ public final class ModelSetup {
       task.cancel()
     }
     operation = nil
+    refreshStorage()
   }
 
   private func run(allowDownload: Bool) async {
-    await runtime.unload()
+    if activeManifest == nil { await runtime.unload() }
     do {
       try ModelStorage.validate(manifest)
       try Task.checkCancellation()
       if FileManager.default.fileExists(atPath: modelDirectory.path) {
-        state = .verifying
+        activity = .verifying
         do {
           try await ModelStorage.verify(manifest, directory: modelDirectory)
         } catch is CancellationError {
@@ -196,10 +281,11 @@ public final class ModelSetup {
       }
       if !FileManager.default.fileExists(atPath: modelDirectory.path) {
         guard allowDownload else {
-          state = FileManager.default.fileExists(atPath: staging.path) ? .paused : .awaitingConsent
+          activity =
+            FileManager.default.fileExists(atPath: staging.path) ? .paused : .awaitingConsent
           return
         }
-        state = .checkingSpace
+        activity = .checkingSpace
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         guard try availableSpace(root) >= requiredFreeBytes,
           try availableSpace(FileManager.default.temporaryDirectory) >= requiredFreeBytes
@@ -211,7 +297,7 @@ public final class ModelSetup {
           let destination = staging.appendingPathComponent(file.name)
           if !(try await ModelStorage.matches(file, at: destination)) {
             try ModelStorage.removeIfPresent(destination)
-            state = .downloading(
+            activity = .downloading(
               file: file.name, completedBytes: completed, totalBytes: manifest.downloadBytes)
             try await transfer.download(
               file, to: destination,
@@ -225,27 +311,33 @@ public final class ModelSetup {
           try ModelStorage.removeIfPresent(staging.appendingPathComponent(file.name + ".resume"))
           completed += file.bytes
         }
-        state = .verifying
+        activity = .verifying
         try await ModelStorage.verify(manifest, directory: staging)
         try Task.checkCancellation()
         // Same-volume rename: an interrupted installation never becomes the installed directory.
         try FileManager.default.moveItem(at: staging, to: modelDirectory)
       }
       try Task.checkCancellation()
-      state = .loading
-      try await runtime.loadAndCheck(directory: modelDirectory)
-      try Task.checkCancellation()
-      state = .ready
+      activity = .loading
+      let selection = selection
+      let revision = manifest.revision
+      // Native verification finishes before this atomic selection write. If the write
+      // fails, the runtime must not switch. Relaunch never trusts this as a ready flag.
+      try await runtime.loadAndCheck(directory: modelDirectory) {
+        try Data(revision.utf8).write(to: selection, options: .atomic)
+      }
+      activeManifest = manifest
+      activity = .ready
     } catch {
-      await runtime.unload()
+      if activeManifest == nil { await runtime.unload() }
       if Task.isCancelled {
-        state = .paused
+        activity = .paused
       } else if let storageError = error as? ModelStorageError {
-        state = .failed(storageError.localizedDescription)
+        activity = .failed(storageError.localizedDescription)
       } else {
         // Provider errors may contain signed URLs or content. Keep raw errors out of UI/logs.
-        state = .failed(
-          "Setup could not finish. Check the connection or local runtime, then retry. No model is ready."
+        activity = .failed(
+          "Setup could not finish. Check the connection or local runtime, then retry."
         )
       }
     }

@@ -32,11 +32,15 @@ public actor MLXLocalModelRuntime: LocalModelRuntime {
   private var container: ModelContainer?
   private var generation: Task<NativeGeneration, Error>?
   private var unloading = false
+  private var loading = false
   public private(set) var lastMetrics: LocalInferenceMetrics?
 
   public init() {}
 
-  public func loadAndCheck(directory: URL) async throws {
+  public func loadAndCheck(directory: URL, commit: @Sendable () throws -> Void) async throws {
+    guard !loading, !unloading else { throw LocalInferenceError.busy }
+    loading = true
+    defer { loading = false }
     if Bundle.main.bundleURL.pathExtension == "app" {
       guard let resources = Bundle.main.resourceURL else {
         throw LocalInferenceError.missingMetalResources
@@ -49,7 +53,6 @@ public actor MLXLocalModelRuntime: LocalModelRuntime {
       // Do not rely on upstream's build-machine absolute-path fallback in a distributed app.
       GPU.metallib = metal
     }
-    await unload()
     let loaded = try await LLMModelFactory.shared.loadContainer(
       from: directory, using: LocalTokenizerLoader())
     try Task.checkCancellation()
@@ -64,6 +67,9 @@ public actor MLXLocalModelRuntime: LocalModelRuntime {
       throw LocalInferenceError.smokeCheckFailed
     }
     try Task.checkCancellation()
+    try commit()
+    // Let an already-running task finish against its original container. New calls
+    // still use that container while preparation runs; only the committed pointer changes.
     container = loaded
     lastMetrics = output.metrics
   }
