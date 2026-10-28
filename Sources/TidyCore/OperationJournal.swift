@@ -82,7 +82,8 @@ public enum SortError: Error, LocalizedError, Equatable {
       "Undo history could not be saved or read. No further file changes were attempted."
     case .busy: "Another task or undo is running. Try again when it finishes."
     case .scopeTooLarge: "More than 1,000 eligible files. Choose a narrower folder."
-    case .confirmationRequired: "Confirm the rename and move counts before changing more than 100 files."
+    case .confirmationRequired:
+      "Confirm the rename and move counts before changing more than 100 files."
     case .invalidPlan: "The plan is invalid or belongs to another folder. No files were changed."
     }
   }
@@ -116,9 +117,7 @@ final class OperationJournal {
       let entries = try JSONDecoder().decode([FileOperation].self, from: Data(contentsOf: file))
       guard
         entries.allSatisfy({ entry in
-          !entry.originalName.isEmpty && !entry.originalName.contains("/")
-            && !entry.originalName.contains("\0")
-            && ![".", ".."].contains(entry.originalName)
+          validFileName(entry.originalName)
             && validFileName(entry.destinationName)
             && ["Documents", "Images", "Audio", "Video", "Archives"].contains(
               entry.destinationFolder)
@@ -220,7 +219,8 @@ func childDirectory(_ parent: Int32, _ name: String) throws -> Int32 {
 func moveExclusive(
   _ source: Int32, _ name: String, _ destination: Int32, as resultingName: String? = nil
 ) throws {
-  guard renameatx_np(source, name, destination, resultingName ?? name, UInt32(RENAME_EXCL)) == 0 else {
+  guard renameatx_np(source, name, destination, resultingName ?? name, UInt32(RENAME_EXCL)) == 0
+  else {
     throw errno == EEXIST ? SortError.conflict : SortError.unavailable
   }
   guard fsync(source) == 0, fsync(destination) == 0 else { throw SortError.unavailable }

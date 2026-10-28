@@ -34,19 +34,24 @@ struct HistoryView: View {
         } else {
           ScrollView {
             LazyVStack(alignment: .leading, spacing: 20) {
-              ForEach(snapshot.operations.reversed()) { entry in
+              ForEach(snapshot.tasks.reversed()) { task in
                 VStack(alignment: .leading, spacing: 8) {
                   HStack {
-                    Text("Task \(entry.id.uuidString)").font(.headline)
+                    Text("Task \(task.id.uuidString)").font(.headline)
                     Spacer()
-                    Button("Undo Task") { undo(entry.id, fileOnly: false) }
-                      .disabled(!entry.canAttemptUndo)
+                    Button("Undo Task") { undo(task.id, fileOnly: false) }
+                      .disabled(!task.operations.contains { $0.canAttemptUndo })
                   }
-                  Text(entry.historyOutcome)
-                  Text("Original: \(entry.originalPath)")
-                  Text("Resulting: \(entry.resultingPath)")
-                  Button("Undo File") { undo(entry.id, fileOnly: true) }
-                    .disabled(!entry.canAttemptUndo)
+                  Text("\(task.operations.count) recorded files")
+                  ForEach(task.operations) { entry in
+                    VStack(alignment: .leading, spacing: 4) {
+                      Text(entry.historyOutcome)
+                      Text("Original: \(entry.originalPath)")
+                      Text("Resulting: \(entry.resultingPath)")
+                      Button("Undo File") { undo(entry.id, fileOnly: true) }
+                        .disabled(!entry.canAttemptUndo)
+                    }
+                  }
                   Divider()
                 }
                 .textSelection(.enabled)

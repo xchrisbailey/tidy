@@ -27,7 +27,6 @@ private struct InventoryView: View {
   @State private var inventory: FolderInventory?
   @State private var errorMessage: String?
   @State private var isInspecting = false
-  @State private var isMutating = false
   @State private var operation: Task<Void, Never>?
   @State private var request = "Sort by type"
   @State private var resultMessage: String?
@@ -66,9 +65,13 @@ private struct InventoryView: View {
         HStack {
           ProgressView().controlSize(.small)
           if let batchProgress {
-            ProgressView(value: Double(batchProgress.processed), total: Double(max(1, batchProgress.total)))
-              .frame(width: 140)
-            Text("\(batchProgress.processed)/\(batchProgress.total) processed · \(batchProgress.changed) changed")
+            ProgressView(
+              value: Double(batchProgress.processed), total: Double(max(1, batchProgress.total))
+            )
+            .frame(width: 140)
+            Text(
+              "\(batchProgress.processed)/\(batchProgress.total) processed · \(batchProgress.changed) changed"
+            )
           } else {
             Text("Working locally…")
           }
@@ -88,9 +91,15 @@ private struct InventoryView: View {
           ScrollView {
             VStack(alignment: .leading) {
               ForEach(batchResult.changed) { entry in
-                Text("Changed: \(entry.originalName) → \(entry.destinationFolder)/\(entry.destinationName)")
+                Text(
+                  "Changed: \(entry.originalName) → \(entry.destinationFolder)/\(entry.destinationName)"
+                )
               }
-              ForEach(Array((batchResult.unchanged + batchResult.skipped + batchResult.failed).enumerated()), id: \.offset) { _, outcome in
+              ForEach(
+                Array(
+                  (batchResult.unchanged + batchResult.skipped + batchResult.failed).enumerated()),
+                id: \.offset
+              ) { _, outcome in
                 Text("\(outcome.name): \(outcome.explanation)")
               }
               ForEach(batchResult.unprocessed, id: \.self) { name in
@@ -178,7 +187,9 @@ private struct InventoryView: View {
       }
     } message: {
       if let plan = pendingPlan {
-        Text("Change \(plan.changedCount) distinct files: \(plan.renameCount) renames and \(plan.moveCount) moves. A file renamed and moved counts once. Completed changes can be undone; nothing will be overwritten.")
+        Text(
+          "Change \(plan.changedCount) distinct files: \(plan.renameCount) renames and \(plan.moveCount) moves. A file renamed and moved counts once. Completed changes can be undone; nothing will be overwritten."
+        )
       }
     }
   }
@@ -235,8 +246,8 @@ private struct InventoryView: View {
       let plan = try await coordinator.planSortByType(request: submitted)
       if plan.requiresConfirmation {
         pendingPlan = plan
-        showConfirmation = true
-        return "Awaiting confirmation: \(plan.changedCount) files, \(plan.renameCount) renames, \(plan.moveCount) moves. No files changed."
+        return
+          "Awaiting confirmation: \(plan.changedCount) files, \(plan.renameCount) renames, \(plan.moveCount) moves. No files changed."
       }
       return try await executeBatch(plan)
     }
@@ -265,7 +276,6 @@ private struct InventoryView: View {
   private func mutate(_ action: @escaping () async throws -> String) {
     guard !isInspecting else { return }
     isInspecting = true
-    isMutating = true
     errorMessage = nil
     resultMessage = nil
     batchResult = nil
@@ -273,13 +283,15 @@ private struct InventoryView: View {
     operation = Task {
       defer {
         isInspecting = false
-        isMutating = false
         batchProgress = nil
+        if pendingPlan != nil { showConfirmation = true }
       }
       do { resultMessage = try await action() } catch { errorMessage = error.localizedDescription }
       do {
         history = try await coordinator.undoHistory()
-        if Task.isCancelled { inventory = nil } else {
+        if Task.isCancelled {
+          inventory = nil
+        } else {
           inventory = try await coordinator.restoreFolder()
         }
       } catch { errorMessage = error.localizedDescription }

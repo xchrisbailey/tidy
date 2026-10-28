@@ -47,12 +47,20 @@ public struct BatchResult: Sendable {
   public internal(set) var failed: [FileOutcome] = []
   public internal(set) var unprocessed: [String] = []
   public internal(set) var cancelled = false
-  public var isPartial: Bool { cancelled || !failed.isEmpty }
+  public internal(set) var failureExplanation: String?
+  public var isPartial: Bool { cancelled || failureExplanation != nil }
   public var explanation: String {
-    let counts = "\(changed.count) changed · \(unchanged.count) unchanged · \(skipped.count) skipped · \(failed.count) failed · \(unprocessed.count) not processed."
+    let counts =
+      "\(changed.count) changed · \(unchanged.count) unchanged · \(skipped.count) skipped · \(failed.count) failed · \(unprocessed.count) not processed."
     if cancelled { return "Cancelled. \(counts) Completed changes remain available for undo." }
-    if !failed.isEmpty { return "Stopped after a failure. \(counts) Check undo history; no automatic rollback was attempted." }
-    if changed.isEmpty { return "No files changed. \(counts) See the per-file reasons; existing folders are not traversed." }
+    if let failureExplanation {
+      return
+        "Stopped after a failure. \(counts) \(failureExplanation) Check undo history; no automatic rollback was attempted."
+    }
+    if changed.isEmpty {
+      return
+        "No files changed. \(counts) See the per-file reasons; existing folders are not traversed."
+    }
     return "\(counts) Completed changes are available for undo."
   }
 }
@@ -86,11 +94,15 @@ extension TaskCoordinator {
     for item in candidates {
       try Task.checkCancellation()
       guard let destination = destinationFolder(for: item.name) else {
-        skipped.append(FileOutcome(name: item.name, reason: .unsupportedType,
-          explanation: "No supported type rule; the file was left untouched."))
+        skipped.append(
+          FileOutcome(
+            name: item.name, reason: .unsupportedType,
+            explanation: "No supported type rule; the file was left untouched."))
         continue
       }
-      guard validFileName(item.name), let snapshot = item.snapshot else { throw SortError.invalidPlan }
+      guard validFileName(item.name), let snapshot = item.snapshot else {
+        throw SortError.invalidPlan
+      }
       let folderInfo = try checkedEntryInfo(root.fd, destination)
       var existingNames: Set<String> = []
       if let folderInfo {
@@ -121,11 +133,14 @@ extension TaskCoordinator {
       guard validFileName(name) else { throw SortError.invalidPlan }
       reserved[destination, default: []].insert(name.lowercased())
       allocated[destination, default: []].insert(name.lowercased())
-      changes.append(PlannedChange(originalName: item.name, destinationFolder: destination,
-        destinationName: name, snapshot: snapshot,
-        destinationIdentity: folderInfo.map(FileIdentity.init)))
+      changes.append(
+        PlannedChange(
+          originalName: item.name, destinationFolder: destination,
+          destinationName: name, snapshot: snapshot,
+          destinationIdentity: folderInfo.map(FileIdentity.init)))
     }
-    return SortPlan(id: UUID(), changes: changes, unchanged: [], skipped: skipped,
+    return SortPlan(
+      id: UUID(), changes: changes, unchanged: [], skipped: skipped,
       rootIdentity: root.identity, folder: root.url)
   }
 
@@ -136,11 +151,14 @@ extension TaskCoordinator {
     guard !activeTask else { throw SortError.busy }
     guard !plan.requiresConfirmation || confirmed else { throw SortError.confirmationRequired }
     let root = try writableFolder()
-    guard root.identity == plan.rootIdentity, root.url == plan.folder else { throw SortError.invalidPlan }
+    guard root.identity == plan.rootIdentity, root.url == plan.folder else {
+      throw SortError.invalidPlan
+    }
     // Plans are immutable and only created here; still validate every operation before any mutation.
     guard plan.changes.count <= 1_000,
       Set(plan.changes.map(\.originalName)).count == plan.changes.count,
-      Set(plan.changes.map { "\($0.destinationFolder)/\($0.destinationName.lowercased())" }).count == plan.changes.count,
+      Set(plan.changes.map { "\($0.destinationFolder)/\($0.destinationName.lowercased())" }).count
+        == plan.changes.count,
       plan.changes.allSatisfy({
         validFileName($0.originalName) && validFileName($0.destinationName)
           && destinationFolder(for: $0.originalName) == $0.destinationFolder
@@ -152,20 +170,29 @@ extension TaskCoordinator {
     // Validate every destination again before the first operation, including after confirmation.
     for change in plan.changes {
       let info = try checkedEntryInfo(root.fd, change.destinationFolder)
-      guard info.map(FileIdentity.init) == change.destinationIdentity else { throw SortError.conflict }
+      guard info.map(FileIdentity.init) == change.destinationIdentity else {
+        throw SortError.conflict
+      }
       if info != nil {
         let directory = try childDirectory(root.fd, change.destinationFolder)
         defer { close(directory) }
-        guard try checkedEntryInfo(directory, change.destinationName) == nil else { throw SortError.conflict }
+        guard try checkedEntryInfo(directory, change.destinationName) == nil else {
+          throw SortError.conflict
+        }
       }
     }
     activeTask = true
-    defer { activeTask = false; selectedInventory = nil }
+    defer {
+      activeTask = false
+      selectedInventory = nil
+    }
     var result = BatchResult(taskID: plan.id, unchanged: plan.unchanged, skipped: plan.skipped)
     var createdFolders: [String: FileIdentity] = [:]
     for (index, change) in plan.changes.enumerated() {
-      await progress(BatchProgress(taskID: plan.id, processed: index,
-        total: plan.changedCount, changed: result.changed.count))
+      await progress(
+        BatchProgress(
+          taskID: plan.id, processed: index,
+          total: plan.changedCount, changed: result.changed.count))
       if Task.isCancelled {
         result.cancelled = true
         result.unprocessed = plan.changes[index...].map(\.originalName)
@@ -175,28 +202,49 @@ extension TaskCoordinator {
         source.st_mode & S_IFMT == S_IFREG, source.st_nlink == 1,
         FileSnapshot(source) == change.snapshot
       else {
-        result.skipped.append(FileOutcome(name: change.originalName, reason: .staleSource,
-          explanation: SortError.staleSource.localizedDescription))
+        result.skipped.append(
+          FileOutcome(
+            name: change.originalName, reason: .staleSource,
+            explanation: SortError.staleSource.localizedDescription))
         continue
       }
       do {
-        let entry = try apply(change, taskID: plan.id, root: root, journal: journal,
+        let entry = try apply(
+          change, taskID: plan.id, root: root, journal: journal,
           entries: &entries, createdFolders: &createdFolders)
         result.changed.append(entry)
       } catch SortError.staleSource {
-        result.skipped.append(FileOutcome(name: change.originalName, reason: .staleSource,
-          explanation: SortError.staleSource.localizedDescription))
+        result.skipped.append(
+          FileOutcome(
+            name: change.originalName, reason: .staleSource,
+            explanation: SortError.staleSource.localizedDescription))
       } catch {
-        // A durable intent may represent a move whose final flush/save failed. Reconcile on reopen.
-        result.failed.append(FileOutcome(name: change.originalName, reason: .failure,
-          explanation: error.localizedDescription))
+        // The exclusive rename may have succeeded before a flush or final journal save failed.
+        // Count the actual change without claiming its durable completion; reopen reconciles intent.
+        if let entry = entries.last, entry.taskID == plan.id,
+          entry.originalName == change.originalName, movedFileExists(entry, root: root)
+        {
+          result.changed.append(entry)
+          result.failureExplanation =
+            "\(change.originalName) moved, but its final recovery record or filesystem flush could not be confirmed. \(error.localizedDescription)"
+        } else {
+          result.failed.append(
+            FileOutcome(
+              name: change.originalName, reason: .failure,
+              explanation: error.localizedDescription))
+          result.failureExplanation = error.localizedDescription
+        }
         result.unprocessed = plan.changes.dropFirst(index + 1).map(\.originalName)
         break
       }
     }
-    await progress(BatchProgress(taskID: plan.id,
-      processed: plan.changedCount - result.unprocessed.count,
-      total: plan.changedCount, changed: result.changed.count))
+    await progress(
+      BatchProgress(
+        taskID: plan.id,
+        processed: plan.changedCount - result.unprocessed.count,
+        total: plan.changedCount, changed: result.changed.count))
+    // Optimized builds must retain cross-instance exclusion through the final callback too.
+    withExtendedLifetime(journal) {}
     return result
   }
 
@@ -204,6 +252,10 @@ extension TaskCoordinator {
     _ change: PlannedChange, taskID: UUID, root: ScopedDirectory, journal: OperationJournal,
     entries: inout [FileOperation], createdFolders: inout [String: FileIdentity]
   ) throws -> FileOperation {
+    var rootInfo = stat()
+    guard lstat(root.url.path, &rootInfo) == 0, FileIdentity(rootInfo) == root.identity else {
+      throw SortError.uncertainIdentity
+    }
     let sourceFD = try pinFile(root.fd, change.originalName, identity: change.snapshot.identity)
     defer { close(sourceFD) }
     let existing = try checkedEntryInfo(root.fd, change.destinationFolder)
@@ -216,7 +268,8 @@ extension TaskCoordinator {
         throw SortError.conflict
       }
     }
-    var entry = FileOperation(id: UUID(), originalName: change.originalName,
+    var entry = FileOperation(
+      id: UUID(), originalName: change.originalName,
       destinationFolder: change.destinationFolder, selectedFolderPath: root.url.path,
       batchID: taskID, resultingName: change.destinationName, state: .intent,
       rootIdentity: root.identity, fileIdentity: change.snapshot.identity)
@@ -245,7 +298,12 @@ extension TaskCoordinator {
     try journal.save(entries)
     guard let current = entryInfo(root.fd, change.originalName),
       FileSnapshot(current) == change.snapshot
-    else { throw SortError.staleSource }
+    else {
+      entry.state = .notApplied
+      entries[index] = entry
+      try journal.save(entries)
+      throw SortError.staleSource
+    }
     try moveExclusive(root.fd, change.originalName, directory, as: change.destinationName)
     guard entryInfo(directory, change.destinationName).map(FileIdentity.init) == entry.fileIdentity
     else { throw SortError.uncertainIdentity }
@@ -253,5 +311,15 @@ extension TaskCoordinator {
     entries[index] = entry
     try journal.save(entries)
     return entry
+  }
+
+  private func movedFileExists(_ entry: FileOperation, root: ScopedDirectory) -> Bool {
+    guard entryInfo(root.fd, entry.originalName) == nil,
+      entryInfo(root.fd, entry.destinationFolder).map(FileIdentity.init)
+        == entry.destinationIdentity,
+      let directory = try? childDirectory(root.fd, entry.destinationFolder)
+    else { return false }
+    defer { close(directory) }
+    return entryInfo(directory, entry.destinationName).map(FileIdentity.init) == entry.fileIdentity
   }
 }

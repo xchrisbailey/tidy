@@ -124,7 +124,11 @@ extension TaskCoordinator {
       try Task.checkCancellation()
       do {
         try undo(entry.id, root: root, journal: journal, entries: &entries)
-      } catch { if firstError == nil { firstError = error } }
+      } catch SortError.conflict {
+        if firstError == nil { firstError = SortError.conflict }
+      } catch SortError.uncertainIdentity {
+        if firstError == nil { firstError = SortError.uncertainIdentity }
+      }
     }
     if let firstError { throw firstError }
   }

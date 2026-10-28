@@ -4,6 +4,21 @@ public struct HistorySnapshot: Sendable {
   public let operations: [FileOperation]
   /// Logical bytes of retained recovery records, excluding grants, models and lock bookkeeping.
   public let recordBytes: Int64
+
+  public var tasks: [HistoryTask] {
+    var order: [UUID] = []
+    var groups: [UUID: [FileOperation]] = [:]
+    for operation in operations {
+      if groups[operation.taskID] == nil { order.append(operation.taskID) }
+      groups[operation.taskID, default: []].append(operation)
+    }
+    return order.map { HistoryTask(id: $0, operations: groups[$0] ?? []) }
+  }
+}
+
+public struct HistoryTask: Sendable, Identifiable {
+  public let id: UUID
+  public let operations: [FileOperation]
 }
 
 public enum HistoryError: Error, LocalizedError, Equatable {
@@ -21,12 +36,13 @@ extension FileOperation {
 
   public var resultingPath: String {
     URL(fileURLWithPath: selectedFolderPath).appendingPathComponent(destinationFolder)
-      .appendingPathComponent(originalName).path
+      .appendingPathComponent(destinationName).path
   }
 }
 
 extension TaskCoordinator {
   public func clearHistory(confirmingUndoLoss: Bool) throws {
+    guard !activeTask else { throw SortError.busy }
     guard confirmingUndoLoss else { throw HistoryError.confirmationRequired }
     try Task.checkCancellation()
     let journal = try OperationJournal(directory: bookmarkFile.deletingLastPathComponent())
@@ -35,6 +51,7 @@ extension TaskCoordinator {
   }
 
   public func historySnapshot() throws -> HistorySnapshot {
+    guard !activeTask else { throw SortError.busy }
     let journal = try OperationJournal(directory: bookmarkFile.deletingLastPathComponent())
     // Browsing must not reconcile or clean up user folders. Undo owns those safety checks.
     let operations = try journal.load()
