@@ -3,6 +3,27 @@ import Testing
 import TidyCore
 
 struct RecoveryTests {
+  @Test func newerTaskConflictDoesNotPreventOtherSafeFilesInPartialTaskUndo() async throws {
+    let fixture = try RecoveryFixture()
+    defer { fixture.remove() }
+    try Data("keep".utf8).write(to: fixture.source)
+    let other = fixture.folder.appendingPathComponent("other.txt")
+    try Data("other".utf8).write(to: other)
+    let coordinator = TaskCoordinator(bookmarkFile: fixture.bookmark)
+    _ = try await coordinator.selectFolderForWriting(fixture.folder)
+    let plan = try await coordinator.planSortByType(request: "Sort by type")
+    _ = try await coordinator.execute(plan)
+    try FileManager.default.moveItem(at: fixture.sorted, to: fixture.source)
+    _ = try await coordinator.selectFolderForWriting(fixture.folder)
+    let newer = try await coordinator.sortByType(request: "Sort by type")
+    let reopened = TaskCoordinator(bookmarkFile: fixture.bookmark)
+    await #expect(throws: SortError.newerOperation) { try await reopened.undoTask(plan.id) }
+    #expect(try Data(contentsOf: other) == Data("other".utf8))
+    #expect(try Data(contentsOf: fixture.sorted) == Data("keep".utf8))
+    #expect(try await reopened.undoHistory().last?.id == newer.id)
+    #expect(try await reopened.undoHistory().last?.state == .completed)
+  }
+
   @Test func changedLocationsDoNotOfferUndoForATerminalRecord() async throws {
     let fixture = try RecoveryFixture()
     defer { fixture.remove() }
