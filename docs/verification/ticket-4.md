@@ -138,3 +138,13 @@ test process; they are not evidence of native consent or an actual app restart.
 
 These remain acceptance gaps, not completed checks; #2, #3, #4 and #13 are not
 claimed closed by this evidence.
+
+## Lead combined verification
+
+After merging at `1f5a202`, the lead ran ordinary `swift test` in the integration
+worktree on 2026-10-28, allowing the already-approved pinned dependency fetches.
+The combined build and tests passed: eight model tests and 31 reported core tests
+(30 executed successfully, one real-provider test explicitly skipped). This
+resolves the worker's integrated dependency-fetch blocker above, not the native
+GUI/provider or release-qualification gaps. Upstream MLX Metal C++17-extension
+warnings and the known resource-bundle creator warning were emitted. No CI used.
