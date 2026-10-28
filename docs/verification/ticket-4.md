@@ -4,7 +4,8 @@
 
 Started with a clean `ticket/4-safe-batches` at the agreed `eb7e84b` base.
 Merged `integration/tidy-v1` including #13 (`b5d4868`) and adapted its existing
-history snapshot/window rather than introducing another history store. Work is
+history snapshot/window rather than introducing another history store. Then merged
+the advanced tip `0ecf6a9` including #6's model setup/dependencies. Work is
 provisional: earlier native acceptance gaps remain open. No ticket was closed.
 
 ## Application boundary
@@ -83,13 +84,32 @@ inventory, one-file safety/reconciliation and history-clear tests remain intact.
 | Check | Result |
 | --- | --- |
 | Baseline `swift test` at `eb7e84b` | 18 executed tests passed; one provider fixture test skipped. |
-| Final `swift test` | 30 executed tests passed; one provider fixture test skipped (31 reported total). |
-| `bash scripts/lint.sh` | Passed strict Swift formatting, packaging plists and shell syntax. |
-| `bash scripts/build-app.sh` | Built sandboxed arm64 development app, ad-hoc signed and signature verified. |
-| `codesign --display --entitlements - .build/Tidy.app` | Sandbox, scoped bookmarks and user-selected read-write; no network entitlement. |
+| `swift test` after #13, before final #6 merge | 30 executed tests passed; one provider fixture test skipped (31 reported total). |
+| `bash scripts/lint.sh` | Passed strict Swift formatting, packaging plists and shell syntax, including after the final #6 merge. |
+| `git diff --check` | Passed, including after the final #6 merge. |
+| `bash scripts/build-app.sh` before #6 merge | Built sandboxed arm64 development app, ad-hoc signed and signature verified. |
+| `codesign --display --entitlements - .build/Tidy.app` before #6 merge | Sandbox, scoped bookmarks and user-selected read-write; no network entitlement in that build. #6 adds its setup network entitlement in the merged source. |
+| Integrated test/build after #6 merge | Test attempt blocked by uncached MLX submodules with network denied; final integrated app build not repeated past that dependency blocker. |
 
-No dependencies, CI, network requests or primary-worktree document edits. No
-commands were blocked or awaiting approval in this worktree.
+No dependencies were introduced by #4; #6's existing approved dependency graph
+was preserved when merging. No CI, successful external network access, model
+download or primary-worktree document edits were performed by this worker.
+
+### Exact integrated-check blockers
+
+Both commands ran in `/Users/chris/dev/utils/tidy-ticket-4`:
+
+1. `sandbox-exec -p '(version 1) (allow default) (deny network*)' swift test --skip-update --disable-automatic-resolution`
+   failed before tests: SwiftPM's nested manifest sandbox reported
+   `sandbox_apply: Operation not permitted`.
+2. `sandbox-exec -p '(version 1) (allow default) (deny network*)' swift test --disable-sandbox --disable-automatic-resolution`
+   retained the outer network denial and disabled only SwiftPM's nested sandbox.
+   Root packages were copied from local caches, but the MLX `mlx` and `mlx-c`
+   submodules were not cached in this worktree. SwiftPM's submodule clone attempts
+   failed with `Could not resolve host: github.com` under the network denial.
+
+No network permission was requested or enabled, and no command is awaiting
+approval. These are explicit failed integrated checks, not passing test evidence.
 
 ## Open manual gates
 
