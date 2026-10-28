@@ -119,7 +119,7 @@ final class OperationJournal {
         entries.allSatisfy({ entry in
           validFileName(entry.originalName)
             && validFileName(entry.destinationName)
-            && ["Documents", "Images", "Audio", "Video", "Archives"].contains(
+            && [".", "Documents", "Images", "Audio", "Video", "Archives"].contains(
               entry.destinationFolder)
         }), Set(entries.map(\.id)).count == entries.count
       else { throw SortError.journalUnavailable }

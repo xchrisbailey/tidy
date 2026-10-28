@@ -98,7 +98,8 @@ private struct InventoryView: View {
               }
               ForEach(
                 Array(
-                  (batchResult.unchanged + batchResult.skipped + batchResult.failed).enumerated()),
+                  (batchResult.unchanged + batchResult.abstained + batchResult.skipped
+                    + batchResult.failed).enumerated()),
                 id: \.offset
               ) { _, outcome in
                 Text("\(outcome.name): \(outcome.explanation)")
@@ -117,7 +118,7 @@ private struct InventoryView: View {
           .disabled(isInspecting || inventory == nil)
       }
       Text(
-        "‘Sort by type’ organizes up to 1,000 eligible direct child files. More than 100 changed files requires confirmation. Unknown extensions are skipped; existing folders are not traversed."
+        "Try ‘Sort by type’ or ‘Rename files replacing spaces with hyphens’. The installed model works offline with names and metadata only. More than 100 changes requires confirmation. Large plans may need a smaller folder; existing folders are not traversed. Model setup is separate in the menu."
       )
       .font(.caption).foregroundStyle(.secondary)
       if let inventory {
@@ -178,7 +179,10 @@ private struct InventoryView: View {
     }
     .padding(24)
     .frame(minWidth: 720, minHeight: 480)
-    .task { inspect() }
+    .task {
+      inspect()
+      await ModelServices.shared.setup.restore()
+    }
     .onDisappear { operation?.cancel() }
     .alert("Confirm large task", isPresented: $showConfirmation) {
       Button("Cancel", role: .cancel) { pendingPlan = nil }
@@ -244,7 +248,22 @@ private struct InventoryView: View {
   private func submit() {
     let submitted = request
     mutate {
-      let plan = try await coordinator.planSortByType(request: submitted)
+      guard ModelServices.shared.setup.state == .ready else {
+        return
+          "The local model is not ready. Open Local Model Setup from the menu to finish setup or check the installed model offline. No files changed."
+      }
+      let runtime = ModelServices.shared.runtime
+      let outcome = try await coordinator.planTask(request: submitted) { system, user, limit in
+        try await runtime.completeJSON(system: system, user: user, maximumOutputTokens: limit)
+      }
+      guard case .plan(let plan) = outcome else {
+        switch outcome {
+        case .clarification(let question):
+          return "Clarification needed: \(question) Edit the request and Run again."
+        case .unsupported(let reason): return "Request declined: \(reason) No files changed."
+        case .plan: return "No files changed."
+        }
+      }
       if plan.requiresConfirmation {
         pendingPlan = plan
         return

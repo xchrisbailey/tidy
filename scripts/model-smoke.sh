@@ -13,7 +13,7 @@ cp Packaging/Info.plist "$app/Contents/Info.plist"
 while IFS= read -r -d '' bundle; do
   cp -R "$bundle" "$app/Contents/Resources/"
 done < <(find "$bin_path" -maxdepth 1 -type d -name '*.bundle' -print0)
-codesign --force --sign - "$app"
+codesign --force --sign - --entitlements Packaging/ModelSmoke.entitlements "$app"
 if [[ "${1:-}" == "--download-approved" ]]; then
   # An explicit developer qualification download, separate from the app's consent UI.
   exec "$app/Contents/MacOS/TidyModelSmoke" --download-approved

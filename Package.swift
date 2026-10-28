@@ -33,7 +33,7 @@ let package = Package(
     .executableTarget(
       name: "TidyModelSmoke",
       dependencies: [
-        "TidyModel", "TidyModelRuntime",
+        "TidyCore", "TidyModel", "TidyModelRuntime",
         .product(name: "MLX", package: "mlx-swift"),
       ]),
     .testTarget(name: "TidyCoreTests", dependencies: ["TidyCore"]),

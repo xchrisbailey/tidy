@@ -6,11 +6,12 @@ public struct SortPlan: Sendable, Identifiable {
   public let changes: [PlannedChange]
   public let unchanged: [FileOutcome]
   public let skipped: [FileOutcome]
+  public internal(set) var abstained: [FileOutcome] = []
   let rootIdentity: FileIdentity
   let folder: URL
   public var changedCount: Int { changes.count }
   public var renameCount: Int { changes.filter { $0.originalName != $0.destinationName }.count }
-  public var moveCount: Int { changes.count }
+  public var moveCount: Int { changes.filter { $0.destinationFolder != "." }.count }
   public var requiresConfirmation: Bool { changedCount > 100 }
 }
 
@@ -45,13 +46,14 @@ public struct BatchResult: Sendable {
   public internal(set) var unchanged: [FileOutcome]
   public internal(set) var skipped: [FileOutcome]
   public internal(set) var failed: [FileOutcome] = []
+  public internal(set) var abstained: [FileOutcome] = []
   public internal(set) var unprocessed: [String] = []
   public internal(set) var cancelled = false
   public internal(set) var failureExplanation: String?
   public var isPartial: Bool { cancelled || failureExplanation != nil }
   public var explanation: String {
     let counts =
-      "\(changed.count) changed · \(unchanged.count) unchanged · \(skipped.count) skipped · \(failed.count) failed · \(unprocessed.count) not processed."
+      "\(changed.count) changed · \(unchanged.count) unchanged · \(abstained.count) abstained · \(skipped.count) skipped · \(failed.count) failed · \(unprocessed.count) not processed."
     if cancelled { return "Cancelled. \(counts) Completed changes remain available for undo." }
     if let failureExplanation {
       return
@@ -161,7 +163,8 @@ extension TaskCoordinator {
         == plan.changes.count,
       plan.changes.allSatisfy({
         validFileName($0.originalName) && validFileName($0.destinationName)
-          && destinationFolder(for: $0.originalName) == $0.destinationFolder
+          && ($0.destinationFolder == "."
+            || destinationFolder(for: $0.originalName) == $0.destinationFolder)
       })
     else { throw SortError.invalidPlan }
     let journal = try OperationJournal(directory: bookmarkFile.deletingLastPathComponent())
@@ -187,6 +190,7 @@ extension TaskCoordinator {
       selectedInventory = nil
     }
     var result = BatchResult(taskID: plan.id, unchanged: plan.unchanged, skipped: plan.skipped)
+    result.abstained = plan.abstained
     var createdFolders: [String: FileIdentity] = [:]
     for (index, change) in plan.changes.enumerated() {
       await progress(
