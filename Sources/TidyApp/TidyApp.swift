@@ -15,6 +15,7 @@ struct TidyApp: App {
       InventoryView(coordinator: coordinator)
     }
     .defaultSize(width: 820, height: 600)
+    ModelSetupScene()
   }
 }
 

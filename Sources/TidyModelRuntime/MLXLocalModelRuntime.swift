@@ -11,6 +11,7 @@ public enum LocalInferenceError: Error {
   case contextLimit
   case outputLimit
   case smokeCheckFailed
+  case missingMetalResources
 }
 
 public struct LocalInferenceMetrics: Sendable {
@@ -36,6 +37,18 @@ public actor MLXLocalModelRuntime: LocalModelRuntime {
   public init() {}
 
   public func loadAndCheck(directory: URL) async throws {
+    if Bundle.main.bundleURL.pathExtension == "app" {
+      guard let resources = Bundle.main.resourceURL else {
+        throw LocalInferenceError.missingMetalResources
+      }
+      let metal = resources.appendingPathComponent(
+        "mlx-swift_Cmlx.bundle/Contents/Resources/default.metallib")
+      guard FileManager.default.fileExists(atPath: metal.path) else {
+        throw LocalInferenceError.missingMetalResources
+      }
+      // Do not rely on upstream's build-machine absolute-path fallback in a distributed app.
+      GPU.metallib = metal
+    }
     await unload()
     let loaded = try await LLMModelFactory.shared.loadContainer(
       from: directory, using: LocalTokenizerLoader())
@@ -56,13 +69,14 @@ public actor MLXLocalModelRuntime: LocalModelRuntime {
   }
 
   public func unload() async {
+    let wasLoaded = container != nil || generation != nil
     unloading = true
     generation?.cancel()
     if let generation { _ = await generation.result }
     generation = nil
     container = nil
     lastMetrics = nil
-    Memory.clearCache()
+    if wasLoaded { Memory.clearCache() }
     unloading = false
   }
 

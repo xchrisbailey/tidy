@@ -1,18 +1,23 @@
 import Foundation
+import Metal
 import Observation
 
 public struct ModelHardware: Sendable {
   public let appleSilicon: Bool
   public let memoryBytes: UInt64
+  public let metalAvailable: Bool
 
-  public init(appleSilicon: Bool, memoryBytes: UInt64) {
+  public init(appleSilicon: Bool, memoryBytes: UInt64, metalAvailable: Bool = true) {
     self.appleSilicon = appleSilicon
     self.memoryBytes = memoryBytes
+    self.metalAvailable = metalAvailable
   }
 
   public static var current: Self {
     #if arch(arm64)
-      Self(appleSilicon: true, memoryBytes: ProcessInfo.processInfo.physicalMemory)
+      Self(
+        appleSilicon: true, memoryBytes: ProcessInfo.processInfo.physicalMemory,
+        metalAvailable: MTLCreateSystemDefaultDevice() != nil)
     #else
       Self(appleSilicon: false, memoryBytes: ProcessInfo.processInfo.physicalMemory)
     #endif
@@ -20,6 +25,7 @@ public struct ModelHardware: Sendable {
 
   public var unavailability: String? {
     if !appleSilicon { return "The local model requires an Apple silicon Mac." }
+    if !metalAvailable { return "Metal GPU access is unavailable in this Mac session." }
     // This is a conservative experimental floor, not a release qualification claim.
     if memoryBytes < 16 << 30 {
       return "This candidate is not enabled on Macs with less than 16 GB of memory."

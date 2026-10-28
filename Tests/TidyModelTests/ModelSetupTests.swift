@@ -4,6 +4,20 @@ import TidyModel
 
 @MainActor
 struct ModelSetupTests {
+  @Test func unavailableMetalDeviceCannotTriggerAnUnusableDownload() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let transfer = ControlledTransfer()
+    let setup = ModelSetup(
+      root: root, manifest: fixtureManifest,
+      hardware: .init(appleSilicon: true, memoryBytes: 36 << 30, metalAvailable: false),
+      transfer: transfer, runtime: ControlledRuntime())
+    await setup.download(consent: true)
+    #expect(setup.state == .unavailable("Metal GPU access is unavailable in this Mac session."))
+    #expect(await transfer.requests == 0)
+    #expect(!FileManager.default.fileExists(atPath: root.path))
+  }
+
   @Test func lowSpaceAndFailedLoadRemainUnusableWithRecoveryFeedback() async throws {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: root) }
