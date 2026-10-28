@@ -106,6 +106,13 @@ extension TaskCoordinator {
   }
 
   public func undoHistory() throws -> [FileOperation] {
+    do { return try loadUndoHistory() } catch {
+      recordDiagnostic(.recoveryFailure)
+      throw error
+    }
+  }
+
+  private func loadUndoHistory() throws -> [FileOperation] {
     guard !activeTask else { throw SortError.busy }
     let journal = try OperationJournal(directory: bookmarkFile.deletingLastPathComponent())
     var entries = try journal.load()
@@ -116,6 +123,13 @@ extension TaskCoordinator {
   }
 
   public func undoTask(_ taskID: UUID) throws {
+    do { try undoRecordedTask(taskID) } catch {
+      recordDiagnostic(.recoveryFailure)
+      throw error
+    }
+  }
+
+  private func undoRecordedTask(_ taskID: UUID) throws {
     guard !activeTask else { throw SortError.busy }
     try Task.checkCancellation()
     let root = try writableFolder()
@@ -141,6 +155,13 @@ extension TaskCoordinator {
   }
 
   public func undoFile(_ operationID: UUID) throws {
+    do { try undoRecordedFile(operationID) } catch {
+      recordDiagnostic(.recoveryFailure)
+      throw error
+    }
+  }
+
+  private func undoRecordedFile(_ operationID: UUID) throws {
     guard !activeTask else { throw SortError.busy }
     try Task.checkCancellation()
     let root = try writableFolder()

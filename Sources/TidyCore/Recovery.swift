@@ -28,6 +28,13 @@ public struct RecoveryOperation: Sendable, Identifiable {
 extension TaskCoordinator {
   /// Reconcile durable records only. Never resume a move, undo, or folder removal on reopen.
   public func recoveryReport() throws -> [RecoveryOperation] {
+    do { return try makeRecoveryReport() } catch {
+      recordDiagnostic(.recoveryFailure)
+      throw error
+    }
+  }
+
+  private func makeRecoveryReport() throws -> [RecoveryOperation] {
     guard !activeTask else { throw SortError.busy }
     let journal = try OperationJournal(directory: bookmarkFile.deletingLastPathComponent())
     var entries = try journal.load()
