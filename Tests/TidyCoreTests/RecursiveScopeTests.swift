@@ -65,6 +65,8 @@ struct RecursiveScopeTests {
   @Test(arguments: [
     "Sort by type; subfolders?", "Sort by type including subfolders but not recursively",
     "Sort by type in subfolder ‘A’",
+    "Sort by type including subfolders named ‘A’",
+    "Sort by type including subfolders ‘A’ and ‘B’",
   ])
   func ambiguousScopeClarifiesWithoutInference(request: String) async throws {
     let fixture = try LanguageFixture()

@@ -98,6 +98,16 @@ func requestedScope(_ request: String) -> RequestedScope {
     return remaining.range(of: positive, options: .regularExpression) == nil ? .direct : .ambiguous
   }
   if containsWord(text, ["subfolder", "subdirectory", "except", "excluding"]) { return .ambiguous }
+  if text.range(
+    of:
+      #"\b(?:subfolders|subdirectories|nested folders)\s+(?:named|called|matching|starting|ending|under)\b"#,
+    options: .regularExpression) != nil
+    || request.range(
+      of: #"\b(?:subfolders?|subdirectories|nested folders?)\s+[‘'“\"]"#,
+      options: [.regularExpression, .caseInsensitive]) != nil
+  {
+    return .ambiguous
+  }
   if text.range(of: positive, options: .regularExpression) != nil {
     return .recursive
   }

@@ -74,6 +74,8 @@ Observed red → green:
    from subfolders.”
 3. Conflicting “including subfolders but not recursively” reached inference as a
    direct-only task. It now asks for scope clarification before inference.
+4. Plural named/quoted subfolder selections reached inference against the whole
+   tree. Those limited-scope requests now clarify rather than broadening access.
 
 Additional regression coverage verifies:
 
@@ -99,7 +101,7 @@ The added real-model recursive task used three eligible nested/type-folder files
 and one hidden subtree. It produced two moves with reserved collision names,
 one already-organized file and one pruned subtree. Existing nested folders and
 the destination folder remained. Reopened undo restored every synthetic file's
-original bytes/path. Final observed recursive task time was 5.522 s; 1,218 prompt /
+original bytes/path. One complete run observed recursive task time of 5.522 s; 1,218 prompt /
 173 output tokens, 1.306 s prefill and 5.444 s generation. Existing metadata,
 combined naming, task-chain undo, oversized-context rejection, native cancellation
 and replacement checks also passed.
