@@ -119,7 +119,7 @@ private struct InventoryView: View {
           .disabled(isInspecting || inventory == nil)
       }
       Text(
-        "Describe a metadata task: group by type or filename/modification year or month; change case or separators, add a quoted prefix/suffix, or prepend a filename/modification date. Rules can be combined. Source files are direct children only; existing folders are not reorganized. More than 100 changes needs confirmation. Large plans may need a smaller scope. Model setup is separate in the menu."
+        "Describe a metadata task: group by type or filename/modification year or month; change case or separators, add a quoted prefix/suffix, or prepend a filename/modification date. Rules can be combined. Only direct-child files are included unless you explicitly say ‘including subfolders’. Existing folders are never renamed or moved. More than 100 changes needs confirmation. Large plans may need a smaller scope. Model setup is separate in the menu."
       )
       .font(.caption).foregroundStyle(.secondary)
       if let inventory {

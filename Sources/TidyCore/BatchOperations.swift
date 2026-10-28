@@ -10,8 +10,12 @@ public struct SortPlan: Sendable, Identifiable {
   let rootIdentity: FileIdentity
   let folder: URL
   public var changedCount: Int { changes.count }
-  public var renameCount: Int { changes.filter { $0.originalName != $0.destinationName }.count }
-  public var moveCount: Int { changes.filter { $0.destinationFolder != "." }.count }
+  public var renameCount: Int {
+    changes.filter { relativeLeaf($0.originalName) != $0.destinationName }.count
+  }
+  public var moveCount: Int {
+    changes.filter { $0.destinationFolder != relativeParent($0.originalName) }.count
+  }
   public var requiresConfirmation: Bool { changedCount > 100 }
 }
 
@@ -21,6 +25,7 @@ public struct PlannedChange: Sendable {
   public let destinationName: String
   let snapshot: FileSnapshot
   let destinationIdentity: FileIdentity?
+  var ancestorIdentities: [String: FileIdentity]? = nil
 }
 
 public enum OutcomeReason: String, Sendable {
@@ -62,7 +67,7 @@ public struct BatchResult: Sendable {
     }
     if changed.isEmpty {
       return
-        "No files changed. \(counts) See the per-file reasons; existing folders are not traversed."
+        "No files changed. \(counts) See the per-file reasons; existing folders were preserved."
     }
     return "\(counts) Completed changes are available for undo."
   }
@@ -163,8 +168,10 @@ extension TaskCoordinator {
       Set(plan.changes.map { "\($0.destinationFolder)/\($0.destinationName.lowercased())" }).count
         == plan.changes.count,
       plan.changes.allSatisfy({
-        validFileName($0.originalName) && validFileName($0.destinationName)
-          && validDestinationFolder($0.destinationFolder)
+        validSourceAuthority($0.originalName, $0.ancestorIdentities)
+          && validFileName($0.destinationName)
+          && (validDestinationFolder($0.destinationFolder)
+            || $0.destinationFolder == relativeParent($0.originalName))
       })
     else { throw SortError.invalidPlan }
     let journal = try OperationJournal(directory: bookmarkFile.deletingLastPathComponent())
@@ -172,6 +179,7 @@ extension TaskCoordinator {
     guard !entries.contains(where: { $0.taskID == plan.id }) else { throw SortError.invalidPlan }
     // Validate every destination again before the first operation, including after confirmation.
     for change in plan.changes {
+      try validateAncestors(root.fd, change.ancestorIdentities)
       let info = try checkedEntryInfo(root.fd, change.destinationFolder)
       guard info.map(FileIdentity.init) == change.destinationIdentity else {
         throw SortError.conflict
@@ -277,6 +285,7 @@ extension TaskCoordinator {
       destinationFolder: change.destinationFolder, selectedFolderPath: root.url.path,
       batchID: taskID, resultingName: change.destinationName, state: .intent,
       rootIdentity: root.identity, fileIdentity: change.snapshot.identity)
+    entry.ancestorIdentities = change.ancestorIdentities
     entries.append(entry)
     let index = entries.count - 1
     try journal.save(entries)
@@ -311,7 +320,21 @@ extension TaskCoordinator {
       throw SortError.staleSource
     }
     try operationCheckpoint(.beforeMove)
-    try moveExclusive(root.fd, change.originalName, directory, as: change.destinationName)
+    try validateAncestors(root.fd, change.ancestorIdentities)
+    let sourceParent = try relativeDirectory(root.fd, relativeParent(change.originalName))
+    defer { close(sourceParent) }
+    var parentInfo = stat()
+    guard fstat(sourceParent, &parentInfo) == 0,
+      FileIdentity(parentInfo)
+        == (change.ancestorIdentities?[relativeParent(change.originalName)] ?? root.identity),
+      entryInfo(root.fd, change.destinationFolder).map(FileIdentity.init)
+        == entry.destinationIdentity
+    else { throw SortError.uncertainIdentity }
+    guard let current = entryInfo(sourceParent, relativeLeaf(change.originalName)),
+      FileSnapshot(current) == change.snapshot
+    else { throw SortError.staleSource }
+    try moveExclusive(
+      sourceParent, relativeLeaf(change.originalName), directory, as: change.destinationName)
     try operationCheckpoint(.afterMove)
     guard entryInfo(directory, change.destinationName).map(FileIdentity.init) == entry.fileIdentity
     else { throw SortError.uncertainIdentity }

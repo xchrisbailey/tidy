@@ -19,6 +19,7 @@ public struct FileOperation: Codable, Sendable, Identifiable {
   let fileIdentity: FileIdentity
   var createdFolder: FileIdentity?
   var destinationIdentity: FileIdentity?
+  var ancestorIdentities: [String: FileIdentity]? = nil
 }
 
 // Birth time supplements device/inode so a recycled inode is not accepted as the original file.
@@ -82,7 +83,8 @@ public enum SortError: Error, LocalizedError, Equatable {
     case .journalUnavailable:
       "Undo history could not be saved or read. No further file changes were attempted."
     case .busy: "Another task or undo is running. Try again when it finishes."
-    case .scopeTooLarge: "More than 1,000 eligible files. Choose a narrower folder."
+    case .scopeTooLarge:
+      "This scope exceeds local task limits (1,000 eligible files or safe traversal bounds). Choose a narrower folder."
     case .confirmationRequired:
       "Confirm the rename and move counts before changing more than 100 files."
     case .invalidPlan: "The plan is invalid or belongs to another folder. No files were changed."
@@ -120,9 +122,10 @@ final class OperationJournal {
       let entries = try JSONDecoder().decode([FileOperation].self, from: Data(contentsOf: file))
       guard
         entries.allSatisfy({ entry in
-          validFileName(entry.originalName)
+          validSourceAuthority(entry.originalName, entry.ancestorIdentities)
             && validFileName(entry.destinationName)
-            && validDestinationFolder(entry.destinationFolder)
+            && (validDestinationFolder(entry.destinationFolder)
+              || entry.destinationFolder == relativeParent(entry.originalName))
         }), Set(entries.map(\.id)).count == entries.count
       else { throw SortError.journalUnavailable }
       return entries
@@ -188,11 +191,24 @@ final class ScopedDirectory {
 }
 
 func entryInfo(_ directory: Int32, _ name: String) -> stat? {
+  if name.contains("/") {
+    guard validRelativePath(name),
+      let parent = try? relativeDirectory(directory, relativeParent(name))
+    else { return nil }
+    defer { close(parent) }
+    return entryInfo(parent, relativeLeaf(name))
+  }
   var info = stat()
   return fstatat(directory, name, &info, AT_SYMLINK_NOFOLLOW) == 0 ? info : nil
 }
 
 func checkedEntryInfo(_ directory: Int32, _ name: String) throws -> stat? {
+  if name.contains("/") {
+    guard validRelativePath(name) else { throw SortError.invalidPlan }
+    let parent = try relativeDirectory(directory, relativeParent(name))
+    defer { close(parent) }
+    return try checkedEntryInfo(parent, relativeLeaf(name))
+  }
   var info = stat()
   if fstatat(directory, name, &info, AT_SYMLINK_NOFOLLOW) == 0 { return info }
   guard errno == ENOENT else { throw SortError.unavailable }
@@ -200,6 +216,11 @@ func checkedEntryInfo(_ directory: Int32, _ name: String) throws -> stat? {
 }
 
 func pinFile(_ parent: Int32, _ name: String, identity: FileIdentity) throws -> Int32 {
+  if name.contains("/") {
+    let directory = try relativeDirectory(parent, relativeParent(name))
+    defer { close(directory) }
+    return try pinFile(directory, relativeLeaf(name), identity: identity)
+  }
   let fd = openat(parent, name, O_EVTONLY | O_NOFOLLOW | O_CLOEXEC)
   guard fd >= 0 else { throw SortError.uncertainIdentity }
   var info = stat()
@@ -213,14 +234,21 @@ func pinFile(_ parent: Int32, _ name: String, identity: FileIdentity) throws -> 
 }
 
 func childDirectory(_ parent: Int32, _ name: String) throws -> Int32 {
-  let fd = openat(parent, name, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
-  guard fd >= 0 else { throw SortError.conflict }
-  return fd
+  try relativeDirectory(parent, name)
 }
 
 func moveExclusive(
   _ source: Int32, _ name: String, _ destination: Int32, as resultingName: String? = nil
 ) throws {
+  if name.contains("/") || resultingName?.contains("/") == true {
+    let sourceParent = try relativeDirectory(source, relativeParent(name))
+    defer { close(sourceParent) }
+    let target = resultingName ?? relativeLeaf(name)
+    let targetParent = try relativeDirectory(destination, relativeParent(target))
+    defer { close(targetParent) }
+    try moveExclusive(sourceParent, relativeLeaf(name), targetParent, as: relativeLeaf(target))
+    return
+  }
   guard renameatx_np(source, name, destination, resultingName ?? name, UInt32(RENAME_EXCL)) == 0
   else {
     throw errno == EEXIST ? SortError.conflict : SortError.unavailable

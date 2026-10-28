@@ -70,6 +70,7 @@ struct ModelSmoke {
     reportMemory("after generation")
     await reportMetrics(runtime)
     try await taskCoordinationSmoke(runtime)
+    try await recursiveTaskSmoke(runtime)
     let cancelled = Task {
       try await runtime.completeJSON(
         system: "Return only a JSON array of integers.",

@@ -91,6 +91,7 @@ extension TaskCoordinator {
 
 // Inspect only pinned, no-follow directories and ordinary single-link files. Names alone are not proof.
 func observedOperation(_ entry: FileOperation, root: ScopedDirectory) throws -> OperationState? {
+  try validateAncestors(root.fd, entry.ancestorIdentities)
   var rootInfo = stat()
   guard lstat(root.url.path, &rootInfo) == 0, FileIdentity(rootInfo) == root.identity else {
     return nil

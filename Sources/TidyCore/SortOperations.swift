@@ -158,6 +158,7 @@ extension TaskCoordinator {
       entries[index].rootIdentity == root.identity
     else { throw SortError.uncertainIdentity }
     var entry = entries[index]
+    try validateAncestors(root.fd, entry.ancestorIdentities)
     if entry.state == .undone || entry.state == .notApplied {
       cleanupFolder(entry, root: root)
       return
@@ -186,6 +187,13 @@ extension TaskCoordinator {
     entries[index] = entry
     try journal.save(entries)
     try operationCheckpoint(.undoIntentSaved)
+    try validateAncestors(root.fd, entry.ancestorIdentities)
+    guard
+      entryInfo(root.fd, entry.destinationFolder).map(FileIdentity.init)
+        == entry.destinationIdentity
+    else {
+      throw SortError.uncertainIdentity
+    }
     guard entryInfo(directory, entry.destinationName).map(FileIdentity.init) == entry.fileIdentity
     else { throw SortError.uncertainIdentity }
     try moveExclusive(directory, entry.destinationName, root.fd, as: entry.originalName)

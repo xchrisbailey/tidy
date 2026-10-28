@@ -22,7 +22,7 @@ extension TaskCoordinator {
         (intent.selection.extensions.isEmpty
           || intent.selection.extensions.contains { $0.lowercased() == ext.lowercased() })
         && (intent.selection.nameContains.isEmpty
-          || item.name.contains(intent.selection.nameContains))
+          || relativeLeaf(item.name).contains(intent.selection.nameContains))
       if !selected {
         unchanged.append(
           FileOutcome(
@@ -41,11 +41,12 @@ extension TaskCoordinator {
               "Insufficient or ambiguous metadata, or the model abstained. Left untouched."))
         continue
       }
-      guard validDestinationFolder(folder), validFileName(name), !name.hasPrefix("."),
+      guard validDestinationFolder(folder) || folder == relativeParent(item.name),
+        validFileName(name), !name.hasPrefix("."),
         validNameFragment(name),
         URL(fileURLWithPath: name).pathExtension == ext
       else { throw PlanningError.invalidResponse }
-      if folder == ".", name == item.name {
+      if folder == relativeParent(item.name), name == relativeLeaf(item.name) {
         unchanged.append(
           FileOutcome(
             name: item.name, reason: .alreadyOrganized,
@@ -111,7 +112,8 @@ extension TaskCoordinator {
       changes.append(
         PlannedChange(
           originalName: item.name, destinationFolder: folder, destinationName: name,
-          snapshot: snapshot, destinationIdentity: identities[folder]))
+          snapshot: snapshot, destinationIdentity: identities[folder],
+          ancestorIdentities: item.ancestorIdentities))
     }
     var plan = SortPlan(
       id: UUID(), changes: changes, unchanged: unchanged,
@@ -125,11 +127,11 @@ extension TaskCoordinator {
 
   private func metadataFolder(_ rule: MetadataIntent.SortRule, item: InventoryItem) -> String? {
     switch rule.kind {
-    case "none": return "."
+    case "none": return relativeParent(item.name)
     case "type": return destinationFolder(for: item.name)
     case "folder": return rule.value
-    case "filenameYear": return filenameDate(item.name, precision: .year)
-    case "filenameMonth": return filenameDate(item.name, precision: .month)
+    case "filenameYear": return filenameDate(relativeLeaf(item.name), precision: .year)
+    case "filenameMonth": return filenameDate(relativeLeaf(item.name), precision: .month)
     case "modifiedYear": return item.modificationDate.map { metadataDate($0, precision: .year) }
     case "modifiedMonth": return item.modificationDate.map { metadataDate($0, precision: .month) }
     default: return nil
@@ -140,7 +142,7 @@ extension TaskCoordinator {
 private func metadataName(_ rules: [MetadataIntent.RenameRule], item: InventoryItem) -> String? {
   let url = URL(fileURLWithPath: item.name)
   let ext = url.pathExtension
-  var stem = ext.isEmpty ? item.name : url.deletingPathExtension().lastPathComponent
+  var stem = ext.isEmpty ? relativeLeaf(item.name) : url.deletingPathExtension().lastPathComponent
   for rule in rules {
     switch rule.kind {
     case "prefix": stem = stem.hasPrefix(rule.value) ? stem : rule.value + stem
@@ -148,7 +150,7 @@ private func metadataName(_ rules: [MetadataIntent.RenameRule], item: InventoryI
     case "filenameDatePrefix", "modifiedDatePrefix":
       let date =
         rule.kind == "filenameDatePrefix"
-        ? filenameDate(item.name, precision: .day)
+        ? filenameDate(relativeLeaf(item.name), precision: .day)
         : item.modificationDate.map { metadataDate($0, precision: .day) }
       guard let date else { return nil }
       if !stem.hasPrefix(date) { stem = date + " " + stem }
