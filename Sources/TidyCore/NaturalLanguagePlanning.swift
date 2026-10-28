@@ -86,6 +86,7 @@ extension TaskCoordinator {
     defer { activeTask = false }
     var correction =
       "Return all documented fields with exact keys and types, and no duplicate keys or paths."
+    var replacementAvailable = true
     for attempt in 0..<2 {
       try Task.checkCancellation()
       let raw = try await model(
@@ -95,7 +96,11 @@ extension TaskCoordinator {
       try Task.checkCancellation()
       guard raw.utf8.count <= 65_536, strictPlanJSON(raw),
         let intent = try? JSONDecoder().decode(MetadataIntent.self, from: Data(raw.utf8))
-      else { continue }
+      else {
+        guard replacementAvailable else { throw PlanningError.invalidResponse }
+        replacementAvailable = false
+        continue
+      }
       do {
         try intent.validate(request: request, sourceIDs: Set(input.metadata.map(\.sourceID)))
         if intent.status == "unsupported" {
@@ -106,16 +111,22 @@ extension TaskCoordinator {
         if intent.status == "clarification" { return .clarification(intent.message) }
         let contentNames = try await resolveContentNames(
           intent, request: request, inventory: inventory, model: model,
-          replacementAvailable: attempt == 0)
+          replacementAvailable: &replacementAvailable)
         let plan = try expandMetadataPlan(intent, inventory: inventory, contentNames: contentNames)
         withExtendedLifetime(root) {}
         return .plan(plan)
       } catch let violation as IntentViolation {
+        guard replacementAvailable else { throw PlanningError.invalidResponse }
+        replacementAvailable = false
         correction = violation.rawValue
         continue
       } catch is ContentNamingFailure {
         throw PlanningError.invalidResponse
-      } catch PlanningError.invalidResponse { continue }
+      } catch PlanningError.invalidResponse {
+        guard replacementAvailable else { throw PlanningError.invalidResponse }
+        replacementAvailable = false
+        continue
+      }
     }
     throw PlanningError.invalidResponse
   }
@@ -172,8 +183,9 @@ extension TaskCoordinator {
     folder moves into ONE immediate child directory; its value must be an exact quoted literal from the request, not a path. Do not invent folder labels. \
     Rename is an ordered array of at most 4 rules, kinds: separator, lowercase, uppercase, titlecase, prefix, suffix, filenameDatePrefix, modifiedDatePrefix, content. \
     For readable/useful names based on contents, use ONE content rule, no other rename rules; evidence quotes the user's naming request, from empty. value is empty unless the user explicitly requests names in another language: then copy the exact language name from the request (e.g. English). Interface language is NOT output-language authority. Contents are inspected separately only after authorization. Never use content for a sort-only request or a purely metadata transformation. \
-    Content naming is a SUPPORTED rename action, not unsupported and not a new clause effect. Example for 'Give files readable names based on their contents' with two files: \
-    {"status":"plan","message":"","clauses":[{"text":"Give files readable names based on their contents","effect":"rename"}],"sort":{"kind":"none","evidence":"","value":""},"rename":[{"kind":"content","evidence":"Give files readable names based on their contents","value":"","from":""}],"selection":{"extensions":[],"nameContains":"","evidence":""},"files":[{"sourceID":"f0","disposition":"apply"},{"sourceID":"f1","disposition":"apply"}]} \
+    Content naming is a SUPPORTED rename action, not unsupported and not a new clause effect. Explicit subfolder inclusion is supported and already enforced by the app: retain those words inside the naming/sorting clause, never invent a scope/recursive/content clause effect. \
+    Example for 'Give files readable names based on their contents including subfolders' with two files: \
+    {"status":"plan","message":"","clauses":[{"text":"Give files readable names based on their contents including subfolders","effect":"rename"}],"sort":{"kind":"none","evidence":"","value":""},"rename":[{"kind":"content","evidence":"Give files readable names based on their contents including subfolders","value":"","from":""}],"selection":{"extensions":[],"nameContains":"","evidence":""},"files":[{"sourceID":"f0","disposition":"apply"},{"sourceID":"f1","disposition":"apply"}]} \
     separator: from/value are space, underscore or hyphen characters (not their words). \
     prefix/suffix: value is an exact quoted user literal, evidence includes prefix/prepend/start/begin or suffix/append/end respectively; from empty. \
     Case rules and date-prefix rules have empty value/from. Date-prefix evidence must specify filename/name or modification date source. \

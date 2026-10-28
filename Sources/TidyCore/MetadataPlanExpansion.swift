@@ -43,7 +43,8 @@ extension TaskCoordinator {
             name: item.name, reason: .abstained,
             explanation:
               contentNames["f\(index)"]?.explanation
-              ?? "Insufficient or ambiguous metadata, or the model abstained. Left untouched."))
+              ?? "Insufficient or ambiguous metadata, or the model abstained. Left untouched.",
+            inspectionCode: contentNames["f\(index)"]?.code))
         continue
       }
       guard validDestinationFolder(folder) || folder == relativeParent(item.name),

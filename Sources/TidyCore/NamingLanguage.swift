@@ -32,11 +32,13 @@ func translatedDescriptors(in text: String, language: String) -> [String] {
 
 func descriptorLanguageMatches(_ text: String, original: String, language: String) -> Bool {
   guard language != "und" else { return true }
-  let words = Set(text.components(separatedBy: CharacterSet.alphanumerics.inverted))
-  let originalWords = Set(original.components(separatedBy: CharacterSet.alphanumerics.inverted))
+  let words = Set(text.lowercased().components(separatedBy: CharacterSet.alphanumerics.inverted))
+  let originalWords = Set(
+    original.lowercased().components(separatedBy: CharacterSet.alphanumerics.inverted))
   return descriptors.allSatisfy { group in
     group.values.allSatisfy { word in
-      !words.contains(word) || originalWords.contains(word) || group[language] == word
+      !words.contains(word.lowercased()) || originalWords.contains(word.lowercased())
+        || group[language] == word
     }
   }
 }

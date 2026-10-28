@@ -4,6 +4,7 @@ import NaturalLanguage
 struct ContentName {
   let name: String?
   let explanation: String
+  var code: InspectionCode? = nil
 }
 
 enum ContentNamingFailure: Error { case invalidResponse }
@@ -33,14 +34,13 @@ private struct NamingReply: Decodable {
 extension TaskCoordinator {
   func resolveContentNames(
     _ intent: MetadataIntent, request: String, inventory: FolderInventory, model: PlanCompletion,
-    replacementAvailable: Bool
+    replacementAvailable: inout Bool
   ) async throws -> [String: ContentName] {
     guard let rule = intent.rename.first(where: { $0.kind == "content" }) else { return [:] }
     let root = try writableFolder()
     guard root.identity == selectedRootIdentity else { throw SortError.writeGrantRequired }
     var budget = InspectionBudget()
     var names: [String: ContentName] = [:]
-    var canReplace = replacementAvailable
     let deadline = ContinuousClock.now.advanced(by: .seconds(45))
     for (index, item) in inventory.candidateFiles.sorted(by: { $0.name < $1.name }).enumerated() {
       try Task.checkCancellation()
@@ -56,19 +56,21 @@ extension TaskCoordinator {
         continue
       }
       guard ContinuousClock.now < deadline else {
-        names[id] = ContentName(name: nil, explanation: InspectionCode.taskLimit.explanation)
+        names[id] = ContentName(
+          name: nil, explanation: InspectionCode.taskLimit.explanation, code: .taskLimit)
         continue
       }
       let evidence: InspectionEvidence
       do { evidence = try inspectContents(item, root: root, budget: &budget) } catch let code
         as InspectionCode
       {
-        names[id] = ContentName(name: nil, explanation: code.explanation)
+        names[id] = ContentName(name: nil, explanation: code.explanation, code: code)
         continue
       }
       let language =
         requestedNamingLanguage(rule.value, request: request)
-        ?? reliableLanguage(evidence.text) ?? reliableLanguage(request) ?? "und"
+        ?? reliableLanguage(evidence.text)
+        ?? reliableLanguage(request, minimumLetters: 12, minimumWords: 3) ?? "und"
       let input = NamingInput(
         request: request, sourceID: id, originalName: relativeLeaf(item.name),
         untrustedEvidence: evidence.text,
@@ -78,9 +80,17 @@ extension TaskCoordinator {
         requiredTokens: protectedOriginalTokens(item.name)
           + contentTokens(evidence.text).filter { $0.contains(where: \.isNumber) }
           + protectedTitleNames(String(evidence.text.split(separator: "\n").first ?? "")))
-      let prompt = String(decoding: try JSONEncoder().encode(input), as: UTF8.self)
+      let encoder = JSONEncoder()
+      encoder.outputFormatting = [.sortedKeys]
+      let prompt = String(decoding: try encoder.encode(input), as: UTF8.self)
       var replacement = false
       while true {
+        try Task.checkCancellation()
+        guard ContinuousClock.now < deadline else {
+          names[id] = ContentName(
+            name: nil, explanation: InspectionCode.deadline.explanation, code: .deadline)
+          break
+        }
         let raw: String
         do {
           raw = try await model(
@@ -91,22 +101,24 @@ extension TaskCoordinator {
                 : ""),
             512)
         } catch PlanningError.requestTooLarge {
-          names[id] = ContentName(name: nil, explanation: InspectionCode.modelLimit.explanation)
+          names[id] = ContentName(
+            name: nil, explanation: InspectionCode.modelLimit.explanation, code: .modelLimit)
           break
         } catch is CancellationError { throw CancellationError() } catch {
           throw ContentNamingFailure.invalidResponse
         }
         try Task.checkCancellation()
         guard ContinuousClock.now < deadline else {
-          names[id] = ContentName(name: nil, explanation: InspectionCode.deadline.explanation)
+          names[id] = ContentName(
+            name: nil, explanation: InspectionCode.deadline.explanation, code: .deadline)
           break
         }
         if let result = validatedContentName(raw, input: input) {
           names[id] = result
           break
         }
-        guard canReplace else { throw ContentNamingFailure.invalidResponse }
-        canReplace = false
+        guard replacementAvailable else { throw ContentNamingFailure.invalidResponse }
+        replacementAvailable = false
         replacement = true
       }
     }
@@ -124,7 +136,7 @@ extension TaskCoordinator {
     outputLanguage is derived from explicit requested language, else source evidence then request, never interface locale.
     Only supportedTranslations may introduce translated descriptor words; keep names/IDs/dates in their exact source spelling.
     If a requested translation cannot be made using these grounded descriptors, abstain, never invent a translation.
-    title MUST use only exact words from evidence, at least two words and 8 UTF-8 bytes. You may rearrange these words.
+    title MUST use only words from evidence, at least two words and 8 UTF-8 bytes. You may rearrange words and change prose capitalization, but requiredTokens keep EXACT spelling.
     Return only JSON with exactly one decision and no explanations:
     {"files":[{"sourceID":"f0","title":"evidence title","name":"Useful title.txt","disposition":"apply"}]}
     Use actual sourceID and extension. For abstention title/name empty and disposition abstain.
@@ -138,25 +150,29 @@ private func validatedContentName(_ raw: String, input: NamingInput) -> ContentN
   else { return nil }
   if decision.disposition == "abstain" {
     guard decision.title.isEmpty, decision.name.isEmpty else { return nil }
-    return ContentName(name: nil, explanation: InspectionCode.insufficient.explanation)
+    return ContentName(
+      name: nil, explanation: InspectionCode.insufficient.explanation, code: .insufficient)
   }
   let stem = URL(fileURLWithPath: decision.name).deletingPathExtension().lastPathComponent
   let supported = Set(
     contentWords(decision.title + " " + input.originalName)
       + translatedDescriptors(in: decision.title, language: input.outputLanguage)
       + input.requiredTokens.flatMap(contentWords))
+  let evidenceWords = Set(contentWords(input.untrustedEvidence).map { $0.lowercased() })
+  let titleWords = contentWords(decision.title).map { $0.lowercased() }
+  let nameWords = contentWords(stem).map { $0.lowercased() }
+  let allowedWords = Set(supported.map { $0.lowercased() })
   guard decision.disposition == "apply", validFileName(decision.name),
     validNameFragment(decision.name), !decision.name.hasPrefix("."),
     URL(fileURLWithPath: decision.name).pathExtension
       == URL(fileURLWithPath: input.originalName).pathExtension,
     decision.title.utf8.count >= 8, contentWords(decision.title).count >= 2,
-    contentWords(decision.title).allSatisfy(Set(contentWords(input.untrustedEvidence)).contains),
-    contentWords(stem).allSatisfy(supported.contains),
-    protectedOriginalTokens(input.originalName).allSatisfy(stem.contains),
-    input.requiredTokens.allSatisfy(stem.contains),
-    contentTokens(input.untrustedEvidence).filter({ $0.contains(where: \.isNumber) }).allSatisfy(
-      stem.contains),
-    protectedTitleNames(decision.title).allSatisfy(stem.contains),
+    titleWords.allSatisfy(evidenceWords.contains), nameWords.allSatisfy(allowedWords.contains),
+    preservesContentTokens(protectedOriginalTokens(input.originalName), in: stem),
+    preservesContentTokens(input.requiredTokens, in: stem),
+    preservesContentTokens(
+      contentTokens(input.untrustedEvidence).filter({ $0.contains(where: \.isNumber) }), in: stem),
+    preservesContentTokens(protectedTitleNames(decision.title), in: stem),
     descriptorLanguageMatches(stem, original: input.originalName, language: input.outputLanguage),
     languageMatches(stem, expected: input.outputLanguage)
   else { return nil }
@@ -167,11 +183,22 @@ private func contentWords(_ text: String) -> [String] {
   text.components(separatedBy: CharacterSet.alphanumerics.inverted).filter { !$0.isEmpty }
 }
 
-private func reliableLanguage(_ text: String) -> String? {
+private func preservesContentTokens(_ tokens: [String], in stem: String) -> Bool {
+  tokens.allSatisfy { token in
+    stem.range(
+      of: #"(?<![\p{L}\p{M}\p{N}])"# + NSRegularExpression.escapedPattern(for: token)
+        + #"(?![\p{L}\p{M}\p{N}])"#, options: .regularExpression) != nil
+  }
+}
+
+private func reliableLanguage(
+  _ text: String, minimumLetters: Int = 40, minimumWords: Int = 6
+) -> String? {
   // Language scores alone can be confident on a short identifier soup. Require enough prose
   // before allowing a source-language guess to override the user's request language.
-  guard text.filter(\.isLetter).count >= 40,
-    contentWords(text).filter({ $0.count >= 3 && !$0.contains(where: \.isNumber) }).count >= 6
+  guard text.filter(\.isLetter).count >= minimumLetters,
+    contentWords(text).filter({ $0.count >= 3 && !$0.contains(where: \.isNumber) }).count
+      >= minimumWords
   else { return nil }
   let recognizer = NLLanguageRecognizer()
   recognizer.processString(text)

@@ -75,8 +75,7 @@ struct ContentNamingTests {
       to: fixture.folder.appendingPathComponent("scan.txt"))
     let coordinator = TaskCoordinator(bookmarkFile: fixture.bookmark)
     _ = try await coordinator.selectFolderForWriting(fixture.folder)
-    let request =
-      "Dale a los archivos nombres legibles basados en su contenido, conservando los identificadores."
+    let request = "Pon nombres legibles usando contenido"
     let intent = try metadataResponse(
       request: request, sort: "none",
       rename: [["kind": "content", "evidence": request, "value": "", "from": ""]])
@@ -151,7 +150,7 @@ struct ContentNamingTests {
   @Test func modelMayComposeUsefulTitleFromSupportedEvidenceWithoutInventingWords() async throws {
     let fixture = try LanguageFixture()
     defer { fixture.remove() }
-    try Data("Acme Invoice AB123 2026-10-28".utf8).write(
+    try Data("Acme Invoice AB123 2026-10-28\nprofessional services".utf8).write(
       to: fixture.folder.appendingPathComponent("scan.txt"))
     let coordinator = TaskCoordinator(bookmarkFile: fixture.bookmark)
     _ = try await coordinator.selectFolderForWriting(fixture.folder)
@@ -161,7 +160,7 @@ struct ContentNamingTests {
       rename: [["kind": "content", "evidence": request, "value": "", "from": ""]])
     let sequence = ResponseSequence([
       intent,
-      #"{"files":[{"sourceID":"f0","title":"Invoice Acme","name":"Invoice Acme AB123 2026-10-28.txt","disposition":"apply"}]}"#,
+      #"{"files":[{"sourceID":"f0","title":"Acme Professional Services","name":"Acme Professional Services AB123 2026-10-28.txt","disposition":"apply"}]}"#,
     ])
     let outcome = try await coordinator.planTask(request: request) { _, _, _ in
       await sequence.next()
@@ -172,7 +171,7 @@ struct ContentNamingTests {
     }
     #expect(
       try await coordinator.execute(plan).changed.first?.destinationName
-        == "Invoice Acme AB123 2026-10-28.txt")
+        == "Acme Professional Services AB123 2026-10-28.txt")
   }
 
   @Test func aggregateInspectionBudgetKeepsReadableNameAndResolvesWholePlanCollisions() async throws
@@ -258,6 +257,9 @@ struct ContentNamingTests {
     let result = try await coordinator.execute(plan)
     #expect(result.changed.count == (accepted ? 1 : 0))
     #expect(result.abstained.count == (accepted ? 0 : 1))
+    if kind == "unsupported" { #expect(result.abstained.first?.inspectionCode == .unsupported) }
+    if kind == "oversized" { #expect(result.abstained.first?.inspectionCode == .inputLimit) }
+    if kind == "invalidUTF8" { #expect(result.abstained.first?.inspectionCode == .unreadable) }
     if accepted { try await coordinator.undoTask(plan.id) }
     #expect(try Data(contentsOf: fixture.folder.appendingPathComponent(name)) == data)
   }
@@ -317,12 +319,19 @@ struct ContentNamingTests {
     #expect(try await coordinator.execute(plan).changed.count == 1)
   }
 
-  @Test(arguments: ["extraAuthority", "duplicateName", "lostEvidenceID", "inventedParty"])
+  @Test(arguments: [
+    "extraAuthority", "duplicateName", "lostEvidenceID", "inventedParty", "substringID",
+    "lostSourceDiacritic",
+  ])
   func completeContentPlanRejectsMalformedOrUnsupportedSuggestions(kind: String) async throws {
     let fixture = try LanguageFixture()
     defer { fixture.remove() }
-    try Data("Acme Invoice AB123 2026-10-28".utf8).write(
-      to: fixture.folder.appendingPathComponent("scan.txt"))
+    let title =
+      kind == "lostSourceDiacritic"
+      ? "Jose\u{301} Invoice AB123 2026-10-28" : "Acme Invoice AB123 2026-10-28"
+    try Data((title + (kind == "substringID" ? " AB1234" : "")).utf8)
+      .write(
+        to: fixture.folder.appendingPathComponent("scan.txt"))
     let coordinator = TaskCoordinator(bookmarkFile: fixture.bookmark)
     _ = try await coordinator.selectFolderForWriting(fixture.folder)
     let request = "Give files readable names from their contents"
@@ -340,6 +349,12 @@ struct ContentNamingTests {
     case "lostEvidenceID":
       bad =
         #"{"files":[{"sourceID":"f0","title":"Acme Invoice AB123 2026-10-28","name":"Acme Invoice.txt","disposition":"apply"}]}"#
+    case "substringID":
+      bad =
+        #"{"files":[{"sourceID":"f0","title":"Acme Invoice AB1234 2026-10-28","name":"Acme Invoice AB1234 2026-10-28.txt","disposition":"apply"}]}"#
+    case "lostSourceDiacritic":
+      bad =
+        #"{"files":[{"sourceID":"f0","title":"Jose Invoice AB123 2026-10-28","name":"Jose Invoice AB123 2026-10-28.txt","disposition":"apply"}]}"#
     default:
       bad =
         #"{"files":[{"sourceID":"f0","title":"Acme Invoice AB123 2026-10-28","name":"InventedCorp Invoice AB123 2026-10-28.txt","disposition":"apply"}]}"#

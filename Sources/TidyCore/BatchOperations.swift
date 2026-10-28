@@ -37,6 +37,7 @@ public struct FileOutcome: Sendable {
   public let name: String
   public let reason: OutcomeReason
   public let explanation: String
+  public internal(set) var inspectionCode: InspectionCode? = nil
 }
 
 public struct BatchProgress: Sendable {

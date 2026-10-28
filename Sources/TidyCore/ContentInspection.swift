@@ -9,7 +9,7 @@ struct InspectionEvidence: Sendable {
   let coverage: String
 }
 
-enum InspectionCode: String, Error, Sendable {
+public enum InspectionCode: String, Error, Sendable {
   case unsupported, unavailable, changed, inputLimit, taskLimit, modelLimit, unreadable,
     insufficient, deadline
 
