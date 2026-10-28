@@ -7,6 +7,7 @@ public struct InventoryItem: Sendable, Identifiable {
   public let skipReason: SkipReason?
   public let byteCount: Int64?
   public let modificationDate: Date?
+  var snapshot: FileSnapshot? = nil
 }
 
 public enum SkipReason: String, Sendable {
@@ -39,7 +40,9 @@ public enum FolderAccessError: Error, LocalizedError, Equatable {
 }
 
 public actor TaskCoordinator {
-  private let bookmarkFile: URL
+  let bookmarkFile: URL
+  var selectedInventory: FolderInventory?
+  var selectedRootIdentity: FileIdentity?
 
   public init(bookmarkFile: URL) {
     self.bookmarkFile = bookmarkFile
@@ -97,7 +100,12 @@ public actor TaskCoordinator {
     if save || stale {
       try saveBookmark(stale ? makeBookmark(folder) : bookmark)
     }
-    return FolderInventory(folder: folder, items: items.sorted { $0.name < $1.name })
+    let result = FolderInventory(folder: folder, items: items.sorted { $0.name < $1.name })
+    selectedInventory = result
+    var rootInfo = stat()
+    guard lstat(folder.path, &rootInfo) == 0 else { throw FolderAccessError.accessUnavailable }
+    selectedRootIdentity = FileIdentity(rootInfo)
+    return result
   }
 
   private func validateFolder(_ folder: URL) throws {
@@ -194,12 +202,14 @@ public actor TaskCoordinator {
         reason = .unavailable
       }
     }
-    return InventoryItem(
+    var item = InventoryItem(
       name: name, skipReason: reason, byteCount: reason == nil ? info.st_size : nil,
       modificationDate: reason == nil
         ? Date(
           timeIntervalSince1970: Double(info.st_mtimespec.tv_sec)
             + Double(info.st_mtimespec.tv_nsec) / 1_000_000_000) : nil
     )
+    item.snapshot = FileSnapshot(info)
+    return item
   }
 }

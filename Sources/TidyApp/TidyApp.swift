@@ -23,36 +23,42 @@ private struct InventoryView: View {
   @State private var inventory: FolderInventory?
   @State private var errorMessage: String?
   @State private var isInspecting = false
+  @State private var isMutating = false
   @State private var operation: Task<Void, Never>?
+  @State private var request = "Sort by type"
+  @State private var resultMessage: String?
+  @State private var history: [FileOperation] = []
 
   var body: some View {
     VStack(alignment: .leading, spacing: 16) {
       HStack {
         VStack(alignment: .leading) {
           Text("Folder inventory").font(.title)
-          Text("Read-only • Direct children only").foregroundStyle(.secondary)
+          Text("Local • Direct children only").foregroundStyle(.secondary)
         }
         Spacer()
-        Button("Select Folder…", action: selectFolder)
+        Button("Inspect Folder…") { selectFolder() }
+          .disabled(isInspecting)
+        Button("Grant Write Access…") { selectFolder(forWriting: true) }
           .disabled(isInspecting)
         Button("Refresh") { inspect() }
           .disabled(isInspecting || inventory == nil)
       }
 
       Text(
-        "Tidy inspects names and metadata locally. This inventory does not read file contents, download files, or change anything. It is not a plan preview."
+        "Inventory reads names and metadata, not file contents. Sorting requires a separate write grant and runs immediately, without a plan preview."
       )
       .font(.callout)
       Text(
-        "Already-downloaded files in synced folders can be eligible. If you organize them in a later version, your existing sync service may transmit those changes."
+        "Already-downloaded files in synced folders can be eligible. Your existing sync service may transmit file moves."
       )
       .font(.callout).foregroundStyle(.secondary)
 
       if isInspecting {
         HStack {
           ProgressView().controlSize(.small)
-          Text("Inspecting folder…")
-          Button("Cancel") { operation?.cancel() }
+          Text("Working locally…")
+          if !isMutating { Button("Cancel") { operation?.cancel() } }
         }
       }
       if let errorMessage {
@@ -60,6 +66,19 @@ private struct InventoryView: View {
           .foregroundStyle(.orange)
           .textSelection(.enabled)
       }
+      if let resultMessage {
+        Text(resultMessage).textSelection(.enabled).accessibilityIdentifier("task-result")
+      }
+      HStack {
+        TextField("Request", text: $request)
+          .accessibilityIdentifier("sort-request")
+        Button("Run") { submit() }
+          .disabled(isInspecting || inventory == nil)
+      }
+      Text(
+        "Only ‘Sort by type’ with exactly one eligible file is supported. Broader requests are not available in this slice. Types: documents, images, audio, video and archives; unknown extensions are refused."
+      )
+      .font(.caption).foregroundStyle(.secondary)
       if let inventory {
         Text(inventory.folder.path).font(.headline).textSelection(.enabled)
         Text(
@@ -91,6 +110,30 @@ private struct InventoryView: View {
         )
       }
       Spacer(minLength: 0)
+      if !history.isEmpty {
+        Text("Undo history").font(.headline)
+        ScrollView {
+          VStack(alignment: .leading, spacing: 8) {
+            ForEach(history.reversed()) { entry in
+              VStack(alignment: .leading) {
+                Text("\(entry.originalName) → \(entry.destinationFolder)/\(entry.originalName)")
+                Text(entry.selectedFolderPath).font(.caption).textSelection(.enabled)
+                HStack {
+                  Text(entry.state.explanation).font(.caption)
+                  if entry.state != .undone && entry.state != .notApplied {
+                    Button("Undo Task") { undo(entry.id, fileOnly: false) }
+                    Button("Undo File") { undo(entry.id, fileOnly: true) }
+                  }
+                }
+              }
+            }
+          }
+        }.frame(maxHeight: 150).disabled(isInspecting)
+        Text(
+          "Undo preserves edits only when the same file can be identified. Occupied locations and uncertain identities are never overwritten. Re-grant the original folder if you have selected another one."
+        )
+        .font(.caption).foregroundStyle(.secondary)
+      }
     }
     .padding(24)
     .frame(minWidth: 720, minHeight: 480)
@@ -98,11 +141,14 @@ private struct InventoryView: View {
     .onDisappear { operation?.cancel() }
   }
 
-  private func selectFolder() {
+  private func selectFolder(forWriting: Bool = false) {
     let panel = NSOpenPanel()
-    panel.title = "Select a folder to inspect"
-    panel.prompt = "Grant Read Access"
-    panel.message = "Tidy only inventories direct children. No files will be changed."
+    panel.title = forWriting ? "Select a folder to organize" : "Select a folder to inspect"
+    panel.prompt = forWriting ? "Grant Write Access" : "Grant Read Access"
+    panel.message =
+      forWriting
+      ? "Allow Tidy to move files and create sorting folders here, and undo its changes. Only this folder is authorized."
+      : "Tidy only inventories direct children. This does not authorize sorting or undo."
     panel.canChooseFiles = false
     panel.canChooseDirectories = true
     panel.allowsMultipleSelection = false
@@ -110,11 +156,11 @@ private struct InventoryView: View {
     panel.resolvesAliases = false
     panel.treatsFilePackagesAsDirectories = false
     if panel.runModal() == .OK, let folder = panel.url {
-      inspect(folder)
+      inspect(folder, forWriting: forWriting)
     }
   }
 
-  private func inspect(_ folder: URL? = nil) {
+  private func inspect(_ folder: URL? = nil, forWriting: Bool = false) {
     guard !isInspecting else { return }
     isInspecting = true
     errorMessage = nil
@@ -123,7 +169,10 @@ private struct InventoryView: View {
       defer { isInspecting = false }
       do {
         if let folder {
-          inventory = try await coordinator.selectFolder(folder)
+          inventory =
+            try await
+            (forWriting
+            ? coordinator.selectFolderForWriting(folder) : coordinator.selectFolder(folder))
         } else {
           inventory = try await coordinator.restoreFolder()
         }
@@ -132,6 +181,57 @@ private struct InventoryView: View {
       } catch {
         errorMessage = error.localizedDescription
       }
+      do { history = try await coordinator.undoHistory() } catch {
+        errorMessage = error.localizedDescription
+      }
+    }
+  }
+
+  private func submit() {
+    let submitted = request
+    mutate {
+      let result = try await coordinator.sortByType(request: submitted)
+      return
+        "Moved \(result.originalName) to \(result.destinationFolder)/\(result.originalName). Name and contents unchanged."
+    }
+  }
+
+  private func undo(_ id: UUID, fileOnly: Bool) {
+    mutate {
+      if fileOnly { try await coordinator.undoFile(id) } else { try await coordinator.undoTask(id) }
+      return
+        "Undo request finished. See the recorded status below; no existing files were overwritten."
+    }
+  }
+
+  private func mutate(_ action: @escaping () async throws -> String) {
+    guard !isInspecting else { return }
+    isInspecting = true
+    isMutating = true
+    errorMessage = nil
+    resultMessage = nil
+    operation = Task {
+      defer {
+        isInspecting = false
+        isMutating = false
+      }
+      do { resultMessage = try await action() } catch { errorMessage = error.localizedDescription }
+      do {
+        history = try await coordinator.undoHistory()
+        inventory = try await coordinator.restoreFolder()
+      } catch { errorMessage = error.localizedDescription }
+    }
+  }
+}
+
+extension OperationState {
+  fileprivate var explanation: String {
+    switch self {
+    case .intent: "Interrupted or incomplete — identity check required"
+    case .completed: "Moved — available for undo"
+    case .undoIntent: "Undo interrupted — identity check required"
+    case .undone: "Undone"
+    case .notApplied: "Not moved — interrupted before the move"
     }
   }
 }
