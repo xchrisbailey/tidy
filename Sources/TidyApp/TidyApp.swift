@@ -19,6 +19,7 @@ struct TidyApp: App {
       HistoryView(coordinator: coordinator)
     }
     .defaultSize(width: 900, height: 640)
+    ModelSetupScene()
   }
 }
 
