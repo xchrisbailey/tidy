@@ -43,12 +43,14 @@ public actor TaskCoordinator {
   let bookmarkFile: URL
   var selectedInventory: FolderInventory?
   var selectedRootIdentity: FileIdentity?
+  var activeTask = false
 
   public init(bookmarkFile: URL) {
     self.bookmarkFile = bookmarkFile
   }
 
   public func restoreFolder() throws -> FolderInventory? {
+    guard !activeTask else { throw SortError.busy }
     try Task.checkCancellation()
     guard FileManager.default.fileExists(atPath: bookmarkFile.path) else { return nil }
     let data: Data
@@ -61,6 +63,7 @@ public actor TaskCoordinator {
   }
 
   public func selectFolder(_ folder: URL) throws -> FolderInventory {
+    guard !activeTask else { throw SortError.busy }
     try Task.checkCancellation()
     let accessing = folder.startAccessingSecurityScopedResource()
     defer { if accessing { folder.stopAccessingSecurityScopedResource() } }

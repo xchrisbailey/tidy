@@ -28,6 +28,10 @@ private struct InventoryView: View {
   @State private var request = "Sort by type"
   @State private var resultMessage: String?
   @State private var history: [FileOperation] = []
+  @State private var pendingPlan: SortPlan?
+  @State private var showConfirmation = false
+  @State private var batchProgress: BatchProgress?
+  @State private var batchResult: BatchResult?
 
   var body: some View {
     VStack(alignment: .leading, spacing: 16) {
@@ -42,7 +46,7 @@ private struct InventoryView: View {
         Button("Grant Write Access…") { selectFolder(forWriting: true) }
           .disabled(isInspecting)
         Button("Refresh") { inspect() }
-          .disabled(isInspecting || inventory == nil)
+          .disabled(isInspecting)
       }
 
       Text(
@@ -57,8 +61,14 @@ private struct InventoryView: View {
       if isInspecting {
         HStack {
           ProgressView().controlSize(.small)
-          Text("Working locally…")
-          if !isMutating { Button("Cancel") { operation?.cancel() } }
+          if let batchProgress {
+            ProgressView(value: Double(batchProgress.processed), total: Double(max(1, batchProgress.total)))
+              .frame(width: 140)
+            Text("\(batchProgress.processed)/\(batchProgress.total) processed · \(batchProgress.changed) changed")
+          } else {
+            Text("Working locally…")
+          }
+          Button("Cancel") { operation?.cancel() }
         }
       }
       if let errorMessage {
@@ -69,6 +79,23 @@ private struct InventoryView: View {
       if let resultMessage {
         Text(resultMessage).textSelection(.enabled).accessibilityIdentifier("task-result")
       }
+      if let batchResult {
+        DisclosureGroup("Per-file results") {
+          ScrollView {
+            VStack(alignment: .leading) {
+              ForEach(batchResult.changed) { entry in
+                Text("Changed: \(entry.originalName) → \(entry.destinationFolder)/\(entry.destinationName)")
+              }
+              ForEach(Array((batchResult.unchanged + batchResult.skipped + batchResult.failed).enumerated()), id: \.offset) { _, outcome in
+                Text("\(outcome.name): \(outcome.explanation)")
+              }
+              ForEach(batchResult.unprocessed, id: \.self) { name in
+                Text("\(name): Not processed after cancellation or failure.")
+              }
+            }.frame(maxWidth: .infinity, alignment: .leading)
+          }.frame(maxHeight: 140)
+        }
+      }
       HStack {
         TextField("Request", text: $request)
           .accessibilityIdentifier("sort-request")
@@ -76,7 +103,7 @@ private struct InventoryView: View {
           .disabled(isInspecting || inventory == nil)
       }
       Text(
-        "Only ‘Sort by type’ with exactly one eligible file is supported. Broader requests are not available in this slice. Types: documents, images, audio, video and archives; unknown extensions are refused."
+        "‘Sort by type’ organizes up to 1,000 eligible direct child files. More than 100 changed files requires confirmation. Unknown extensions are skipped; existing folders are not traversed."
       )
       .font(.caption).foregroundStyle(.secondary)
       if let inventory {
@@ -116,12 +143,12 @@ private struct InventoryView: View {
           VStack(alignment: .leading, spacing: 8) {
             ForEach(history.reversed()) { entry in
               VStack(alignment: .leading) {
-                Text("\(entry.originalName) → \(entry.destinationFolder)/\(entry.originalName)")
+                Text("\(entry.originalName) → \(entry.destinationFolder)/\(entry.destinationName)")
                 Text(entry.selectedFolderPath).font(.caption).textSelection(.enabled)
                 HStack {
                   Text(entry.state.explanation).font(.caption)
                   if entry.state != .undone && entry.state != .notApplied {
-                    Button("Undo Task") { undo(entry.id, fileOnly: false) }
+                    Button("Undo Task") { undo(entry.taskID, fileOnly: false) }
                     Button("Undo File") { undo(entry.id, fileOnly: true) }
                   }
                 }
@@ -139,6 +166,17 @@ private struct InventoryView: View {
     .frame(minWidth: 720, minHeight: 480)
     .task { inspect() }
     .onDisappear { operation?.cancel() }
+    .alert("Confirm large task", isPresented: $showConfirmation) {
+      Button("Cancel", role: .cancel) { pendingPlan = nil }
+      Button("Continue") {
+        if let plan = pendingPlan { runBatch(plan, confirmed: true) }
+        pendingPlan = nil
+      }
+    } message: {
+      if let plan = pendingPlan {
+        Text("Change \(plan.changedCount) distinct files: \(plan.renameCount) renames and \(plan.moveCount) moves. A file renamed and moved counts once. Completed changes can be undone; nothing will be overwritten.")
+      }
+    }
   }
 
   private func selectFolder(forWriting: Bool = false) {
@@ -190,10 +228,26 @@ private struct InventoryView: View {
   private func submit() {
     let submitted = request
     mutate {
-      let result = try await coordinator.sortByType(request: submitted)
-      return
-        "Moved \(result.originalName) to \(result.destinationFolder)/\(result.originalName). Name and contents unchanged."
+      let plan = try await coordinator.planSortByType(request: submitted)
+      if plan.requiresConfirmation {
+        pendingPlan = plan
+        showConfirmation = true
+        return "Awaiting confirmation: \(plan.changedCount) files, \(plan.renameCount) renames, \(plan.moveCount) moves. No files changed."
+      }
+      return try await executeBatch(plan)
     }
+  }
+
+  private func runBatch(_ plan: SortPlan, confirmed: Bool) {
+    mutate { try await executeBatch(plan, confirmed: confirmed) }
+  }
+
+  private func executeBatch(_ plan: SortPlan, confirmed: Bool = false) async throws -> String {
+    let result = try await coordinator.execute(plan, confirmed: confirmed) { progress in
+      await MainActor.run { batchProgress = progress }
+    }
+    batchResult = result
+    return result.explanation
   }
 
   private func undo(_ id: UUID, fileOnly: Bool) {
@@ -210,15 +264,20 @@ private struct InventoryView: View {
     isMutating = true
     errorMessage = nil
     resultMessage = nil
+    batchResult = nil
+    batchProgress = nil
     operation = Task {
       defer {
         isInspecting = false
         isMutating = false
+        batchProgress = nil
       }
       do { resultMessage = try await action() } catch { errorMessage = error.localizedDescription }
       do {
         history = try await coordinator.undoHistory()
-        inventory = try await coordinator.restoreFolder()
+        if Task.isCancelled { inventory = nil } else {
+          inventory = try await coordinator.restoreFolder()
+        }
       } catch { errorMessage = error.localizedDescription }
     }
   }
