@@ -45,6 +45,8 @@ public actor TaskCoordinator {
   var selectedInventory: FolderInventory?
   var selectedRootIdentity: FileIdentity?
   var activeTask = false
+  var diagnosticCounters: [DiagnosticCode: Int] = [:]
+  var inspectionDiagnosticCounters: [InspectionCode: Int] = [:]
   let operationCheckpoint: @Sendable (OperationCheckpoint) throws -> Void
 
   public init(

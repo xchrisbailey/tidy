@@ -34,6 +34,27 @@ private struct PlanningInput: Encodable {
 
 extension TaskCoordinator {
   public func planTask(request: String, model: PlanCompletion) async throws -> TaskPlanningOutcome {
+    do {
+      let outcome = try await prepareTask(request: request, model: model)
+      if case .plan(let plan) = outcome { recordInspectionCodes(plan.abstained) }
+      return outcome
+    } catch {
+      if error is CancellationError {
+        recordDiagnostic(.interrupted)
+      } else if error is PlanningError {
+        recordDiagnostic(.invalidPlan)
+      } else if error is SortError || error is FolderAccessError {
+        recordDiagnostic(.taskFailure)
+      } else {
+        recordDiagnostic(.modelFailure)
+      }
+      throw error
+    }
+  }
+
+  private func prepareTask(request: String, model: PlanCompletion) async throws
+    -> TaskPlanningOutcome
+  {
     guard !activeTask else { throw SortError.busy }
     try Task.checkCancellation()
     guard request.utf8.count <= 4_096 else { throw PlanningError.requestTooLarge }

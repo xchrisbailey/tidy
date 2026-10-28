@@ -20,6 +20,11 @@ struct TidyApp: App {
       HistoryView(coordinator: coordinator)
     }
     .defaultSize(width: 900, height: 640)
+    Window("Private Diagnostics", id: "diagnostics") {
+      DiagnosticsView(coordinator: coordinator)
+    }
+    .defaultSize(width: 580, height: 420)
+    .commands { DiagnosticsCommands() }
     ModelSetupScene()
   }
 }
@@ -37,6 +42,7 @@ private struct InventoryView: View {
   @State private var showConfirmation = false
   @State private var batchProgress: BatchProgress?
   @State private var batchResult: BatchResult?
+  @Environment(\.openWindow) private var openWindow
 
   var body: some View {
     VStack(alignment: .leading, spacing: 16) {
@@ -52,6 +58,7 @@ private struct InventoryView: View {
           .disabled(isInspecting)
         Button("Refresh") { inspect() }
           .disabled(isInspecting)
+        Button("Diagnostics…") { openWindow(id: "diagnostics") }
       }
 
       Text(
@@ -250,6 +257,7 @@ private struct InventoryView: View {
     let submitted = request
     mutate {
       guard ModelServices.shared.setup.state == .ready else {
+        await coordinator.recordDiagnostic(.modelUnavailable)
         return
           "The local model is not ready. Open Local Model Setup from the menu to finish setup or check the installed model offline. No files changed."
       }

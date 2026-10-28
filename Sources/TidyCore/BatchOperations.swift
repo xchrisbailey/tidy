@@ -157,6 +157,21 @@ extension TaskCoordinator {
     _ plan: SortPlan, confirmed: Bool = false,
     progress: @Sendable (BatchProgress) async -> Void = { _ in }
   ) async throws -> BatchResult {
+    do {
+      let result = try await executeRecordedPlan(plan, confirmed: confirmed, progress: progress)
+      if result.cancelled || result.failureExplanation != nil { recordDiagnostic(.interrupted) }
+      if !result.failed.isEmpty { recordDiagnostic(.taskFailure) }
+      return result
+    } catch {
+      recordDiagnostic(error is CancellationError ? .interrupted : .taskFailure)
+      throw error
+    }
+  }
+
+  private func executeRecordedPlan(
+    _ plan: SortPlan, confirmed: Bool,
+    progress: @Sendable (BatchProgress) async -> Void
+  ) async throws -> BatchResult {
     guard !activeTask else { throw SortError.busy }
     guard !plan.requiresConfirmation || confirmed else { throw SortError.confirmationRequired }
     let root = try writableFolder()
