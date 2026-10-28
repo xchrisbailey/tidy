@@ -153,5 +153,20 @@ worker cleanup stress, source-race stress, broader languages, 90% usefulness/80%
 cryptic coverage and 100-file/60-second qualification remain open. Deterministic
 cancellation during naming is not claimed as blocked-PDFKit cancellation proof.
 
-Final commands/results and integrated commit ancestry are recorded below after
-the integration merge.
+## Final integrated checks
+
+Implementation commit `3b0f9a9`; merged current integration tip `ce039d1` (#14)
+without conflicts in `589f7db`. No diagnostics or UI implementation was replaced.
+
+| Command | Result |
+| --- | --- |
+| `swift test --disable-automatic-resolution` | Passed after integration: 88 reported core tests, one existing real-provider fixture skipped (87 executed), plus 11 executed model tests; **98 executed total**. Three PDF test functions cover 14 parameterized cases with real native fixtures. |
+| `bash scripts/lint.sh` | Passed strict Swift formatting, four plists and shell syntax. |
+| `git diff --check` | Passed. |
+| `bash scripts/build-app.sh` | Passed arm64 packaging, bundled MLX resources, inside-out ad-hoc helper/app signing and strict signature verification; not a runtime sandbox launch check. |
+| `bash scripts/model-smoke.sh --package-only` | Passed preparation of the separately signed diagnostic; no launch/download. |
+| Packaged offline PDF smoke | **Failed**, nested-sandbox initialization permission block recorded above; no repeated blocked invocation after diagnosis. |
+| Direct signed `--pdf-evidence` real-model smoke | **Failed safely** with invalid structured response; no PDF naming/quality or offline qualification claimed. |
+
+The pre-existing upstream MLX resource-bundle mutated-node warning remains
+nonfatal. No GUI was launched or interacted with. No issue was closed.
