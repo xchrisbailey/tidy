@@ -15,6 +15,10 @@ struct TidyApp: App {
       InventoryView(coordinator: coordinator)
     }
     .defaultSize(width: 820, height: 600)
+    Window("Undo History", id: "history") {
+      HistoryView(coordinator: coordinator)
+    }
+    .defaultSize(width: 900, height: 640)
   }
 }
 
