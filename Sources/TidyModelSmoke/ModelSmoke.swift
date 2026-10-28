@@ -187,6 +187,42 @@ struct ModelSmoke {
     print(
       "Real-model rename then sort chain passed: newest-first reopened undo and original bytes verified"
     )
+    _ = try await coordinator.restoreFolder()
+    let combinedStart = ContinuousClock.now
+    let combined = try await coordinator.planTask(
+      request:
+        "Group files into folders by the month in their filenames, lowercase the names, replace spaces with underscores, and prepend ‘Filed-’."
+    ) { system, user, limit in
+      try await runtime.completeJSON(system: system, user: user, maximumOutputTokens: limit)
+    }
+    guard case .plan(let combinedPlan) = combined else {
+      throw LocalInferenceError.smokeCheckFailed
+    }
+    let combinedResult = try await coordinator.execute(combinedPlan)
+    guard combinedResult.changed.count == 1, combinedResult.abstained.count == 2,
+      combinedPlan.moveCount == 1, combinedPlan.renameCount == 1,
+      try String(
+        contentsOf: folder.appendingPathComponent("2026-10/Filed-invoice_2026-10-28_AB123.txt"),
+        encoding: .utf8) == "non-sensitive qualification fixture"
+    else { throw LocalInferenceError.smokeCheckFailed }
+    try await TaskCoordinator(bookmarkFile: bookmark).undoTask(combinedPlan.id)
+    print(
+      "Real-model filename-month sort + case/separator/prefix naming passed, protected date/ID/extension and reopened undo verified; seconds: \(combinedStart.duration(to: .now))"
+    )
+    await reportMetrics(runtime)
+    _ = try await coordinator.restoreFolder()
+    let ambiguous = try await coordinator.planTask(request: "Group these files by date") {
+      system, user, limit in
+      try await runtime.completeJSON(system: system, user: user, maximumOutputTokens: limit)
+    }
+    guard case .clarification = ambiguous else { throw LocalInferenceError.smokeCheckFailed }
+    let unsupported = try await coordinator.planTask(
+      request: "Sort files by type and delete duplicates"
+    ) { system, user, limit in
+      try await runtime.completeJSON(system: system, user: user, maximumOutputTokens: limit)
+    }
+    guard case .unsupported = unsupported else { throw LocalInferenceError.smokeCheckFailed }
+    print("Date ambiguity clarification and mixed unsupported refusal changed nothing")
     for index in 0..<300 {
       try Data("non-sensitive bound fixture".utf8).write(
         to: folder.appendingPathComponent(

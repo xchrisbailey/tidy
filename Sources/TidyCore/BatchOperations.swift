@@ -24,7 +24,8 @@ public struct PlannedChange: Sendable {
 }
 
 public enum OutcomeReason: String, Sendable {
-  case ineligible, unsupportedType, alreadyOrganized, abstained, staleSource, failure
+  case ineligible, unsupportedType, alreadyOrganized, outsideRequest, abstained, staleSource,
+    failure
 }
 
 public struct FileOutcome: Sendable {
@@ -163,8 +164,7 @@ extension TaskCoordinator {
         == plan.changes.count,
       plan.changes.allSatisfy({
         validFileName($0.originalName) && validFileName($0.destinationName)
-          && ($0.destinationFolder == "."
-            || destinationFolder(for: $0.originalName) == $0.destinationFolder)
+          && validDestinationFolder($0.destinationFolder)
       })
     else { throw SortError.invalidPlan }
     let journal = try OperationJournal(directory: bookmarkFile.deletingLastPathComponent())

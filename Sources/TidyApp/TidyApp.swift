@@ -55,7 +55,7 @@ private struct InventoryView: View {
       }
 
       Text(
-        "Inventory reads names and metadata, not file contents. Sorting requires a separate write grant and runs immediately, without a plan preview."
+        "Inventory reads names and metadata, not file contents. Sorting or renaming requires a separate write grant and runs immediately, without a plan preview."
       )
       .font(.callout)
       Text(
@@ -119,7 +119,7 @@ private struct InventoryView: View {
           .disabled(isInspecting || inventory == nil)
       }
       Text(
-        "Try ‘Sort by type’ or ‘Rename files replacing spaces with hyphens’. The installed model works offline with names and metadata only. More than 100 changes requires confirmation. Large plans may need a smaller folder; existing folders are not traversed. Model setup is separate in the menu."
+        "Describe a metadata task: group by type or filename/modification year or month; change case or separators, add a quoted prefix/suffix, or prepend a filename/modification date. Rules can be combined. Source files are direct children only; existing folders are not reorganized. More than 100 changes needs confirmation. Large plans may need a smaller scope. Model setup is separate in the menu."
       )
       .font(.caption).foregroundStyle(.secondary)
       if let inventory {
@@ -206,7 +206,7 @@ private struct InventoryView: View {
     panel.prompt = forWriting ? "Grant Write Access" : "Grant Read Access"
     panel.message =
       forWriting
-      ? "Allow Tidy to move files and create sorting folders here, and undo its changes. Only this folder is authorized."
+      ? "Allow Tidy to rename and move files, create sorting folders here, and undo its changes. Only this folder is authorized."
       : "Tidy only inventories direct children. This does not authorize sorting or undo."
     panel.canChooseFiles = false
     panel.canChooseDirectories = true
@@ -331,10 +331,10 @@ extension OperationState {
   fileprivate var explanation: String {
     switch self {
     case .intent: "Interrupted or incomplete — identity check required"
-    case .completed: "Moved — available for undo"
+    case .completed: "Changed — available for undo"
     case .undoIntent: "Undo interrupted — identity check required"
     case .undone: "Undone"
-    case .notApplied: "Not moved — interrupted before the move"
+    case .notApplied: "Not changed — interrupted before the change"
     }
   }
 }

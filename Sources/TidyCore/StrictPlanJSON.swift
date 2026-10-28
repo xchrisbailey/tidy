@@ -4,9 +4,16 @@ func strictPlanJSON(_ text: String) -> Bool {
   let data = Data(text.utf8)
   guard let object = try? JSONSerialization.jsonObject(with: data),
     let envelope = object as? [String: Any],
-    Set(envelope.keys) == ["status", "message", "files"],
+    Set(envelope.keys) == ["status", "message", "clauses", "sort", "rename", "selection", "files"],
+    let clauses = envelope["clauses"] as? [[String: Any]],
+    clauses.allSatisfy({ Set($0.keys) == ["text", "effect"] }),
+    let sort = envelope["sort"] as? [String: Any], Set(sort.keys) == ["kind", "evidence", "value"],
+    let rename = envelope["rename"] as? [[String: Any]],
+    rename.allSatisfy({ Set($0.keys) == ["kind", "evidence", "value", "from"] }),
+    let selection = envelope["selection"] as? [String: Any],
+    Set(selection.keys) == ["extensions", "nameContains", "evidence"],
     let files = envelope["files"] as? [[String: Any]],
-    files.allSatisfy({ Set($0.keys) == ["sourceID", "disposition", "folder", "name"] })
+    files.allSatisfy({ Set($0.keys) == ["sourceID", "disposition"] })
   else { return false }
   // Foundation decoders accept duplicate keys. Reject them before interpreting any model authority.
   let bytes = Array(data)

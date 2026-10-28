@@ -9,22 +9,20 @@ struct NaturalLanguageTests {
     try fixture.write("Invoice 2026-10-28 AB123.TXT")
     let coordinator = TaskCoordinator(bookmarkFile: fixture.bookmark)
     _ = try await coordinator.selectFolderForWriting(fixture.folder)
+    let renameRequest = "Rename files replacing spaces with hyphens"
+    let renameResponse = try metadataResponse(
+      request: renameRequest, sort: "none", rename: [separatorRule(evidence: renameRequest)])
     let rename = try await coordinator.planTask(
-      request: "Rename files replacing spaces with hyphens",
-      model: { _, _, _ in
-        #"{"status":"plan","message":"","files":[{"sourceID":"f0","disposition":"change","folder":".","name":"Invoice-2026-10-28-AB123.TXT"}]}"#
-      })
+      request: renameRequest, model: { _, _, _ in renameResponse })
     guard case .plan(let first) = rename else {
       Issue.record("Expected rename")
       return
     }
     _ = try await coordinator.execute(first)
     _ = try await coordinator.restoreFolder()
+    let sortResponse = try metadataResponse(request: "Sort by type")
     let sort = try await coordinator.planTask(
-      request: "Sort by type",
-      model: { _, _, _ in
-        #"{"status":"plan","message":"","files":[{"sourceID":"f0","disposition":"change","folder":"Documents","name":"Invoice-2026-10-28-AB123.TXT"}]}"#
-      })
+      request: "Sort by type", model: { _, _, _ in sortResponse })
     guard case .plan(let second) = sort else {
       Issue.record("Expected sort")
       return
@@ -45,14 +43,12 @@ struct NaturalLanguageTests {
     defer { fixture.remove() }
     for index in 0..<101 { try fixture.write("File \(index).txt") }
     let coordinator = TaskCoordinator(bookmarkFile: fixture.bookmark)
-    let inventory = try await coordinator.selectFolderForWriting(fixture.folder)
-    let files = inventory.candidateFiles.sorted { $0.name < $1.name }.enumerated().map {
-      index, item in
-      "{\"sourceID\":\"f\(index)\",\"disposition\":\"change\",\"folder\":\".\",\"name\":\"\(item.name.replacingOccurrences(of: " ", with: "-"))\"}"
-    }.joined(separator: ",")
-    let response = "{\"status\":\"plan\",\"message\":\"\",\"files\":[\(files)]}"
-    let outcome = try await coordinator.planTask(
-      request: "Rename files replacing spaces with hyphens", model: { _, _, _ in response })
+    _ = try await coordinator.selectFolderForWriting(fixture.folder)
+    let request = "Rename files replacing spaces with hyphens"
+    let response = try metadataResponse(
+      request: request, sort: "none", rename: [separatorRule(evidence: request)],
+      decisions: Array(repeating: "apply", count: 101))
+    let outcome = try await coordinator.planTask(request: request, model: { _, _, _ in response })
     guard case .plan(let plan) = outcome else {
       Issue.record("Expected rename plan")
       return
@@ -84,14 +80,14 @@ struct NaturalLanguageTests {
     try fixture.write("a.txt")
     let coordinator = TaskCoordinator(bookmarkFile: fixture.bookmark)
     _ = try await coordinator.selectFolderForWriting(fixture.folder)
+    let response = try metadataResponse(request: "Sort by type")
     let task = Task {
       try await coordinator.planTask(
         request: "Sort by type",
         model: { _, _, _ in
           await #expect(throws: SortError.busy) { try await coordinator.restoreFolder() }
           withUnsafeCurrentTask { $0?.cancel() }
-          return
-            #"{"status":"plan","message":"","files":[{"sourceID":"f0","disposition":"change","folder":"Documents","name":"a.txt"}]}"#
+          return response
         })
     }
     await #expect(throws: CancellationError.self) { try await task.value }
@@ -100,80 +96,34 @@ struct NaturalLanguageTests {
   }
 
   @Test(arguments: [
-    "not JSON", "{\"status\":\"plan\",\"message\":\"\",\"files\":[]}",
-    #"{"status":"plan","message":"","files":[{"sourceID":"f9","disposition":"change","folder":"Documents","name":"a.txt"}]}"#,
-    #"{"status":"plan","message":"","files":[{"sourceID":"f0","disposition":"change","folder":"../outside","name":"a.txt"}]}"#,
-    #"{"status":"plan","message":"","files":[{"sourceID":"f0","disposition":"change","folder":"Documents","name":"invented.txt"}]}"#,
-    #"{"status":"plan","status":"plan","message":"","files":[{"sourceID":"f0","disposition":"change","folder":"Documents","name":"a.txt"}]}"#,
-    #"{"status":"plan","message":"","files":[{"sourceID":"f0","disposition":"delete","folder":"Documents","name":"a.txt"}]}"#,
-    #"{"status":"plan","message":"","files":[{"sourceID":"f0","disposition":"change","folder":"Documents","name":"a.txt"},{"sourceID":"f0","disposition":"change","folder":"Documents","name":"a.txt"}]}"#,
+    "malformed", "missing", "invented", "duplicateID", "duplicateKey", "extra", "delete", "rawPath",
   ])
-  func malformedAndUnauthorizedPlansCannotMutate(response: String) async throws {
+  func malformedAndUnauthorizedPlansCannotMutate(kind: String) async throws {
     let fixture = try LanguageFixture()
     defer { fixture.remove() }
     try fixture.write("a.txt")
     let coordinator = TaskCoordinator(bookmarkFile: fixture.bookmark)
     _ = try await coordinator.selectFolderForWriting(fixture.folder)
+    var response = try metadataResponse(request: "Sort by type")
+    switch kind {
+    case "malformed": response = "{"
+    case "missing": response = try metadataResponse(request: "Sort by type", decisions: [])
+    case "invented": response = response.replacingOccurrences(of: "f0", with: "f9")
+    case "duplicateID":
+      response = try metadataResponse(request: "Sort by type", decisions: ["apply", "apply"])
+        .replacingOccurrences(of: "f1", with: "f0")
+    case "duplicateKey":
+      response = response.replacingOccurrences(
+        of: "\"status\":\"plan\"", with: "\"status\":\"plan\",\"status\":\"plan\"")
+    case "extra":
+      response = response.replacingOccurrences(
+        of: "\"status\":\"plan\"", with: "\"delete\":true,\"status\":\"plan\"")
+    case "delete": response = response.replacingOccurrences(of: "\"apply\"", with: "\"delete\"")
+    default:
+      response = response.replacingOccurrences(
+        of: "\"sourceID\":\"f0\"", with: "\"sourceID\":\"f0\",\"folder\":\"../outside\"")
+    }
     let responses = ResponseSequence([response])
-    await #expect(throws: PlanningError.invalidResponse) {
-      try await coordinator.planTask(
-        request: "Sort by type", model: { _, _, _ in await responses.next() })
-    }
-    #expect(await responses.count == 2)
-    #expect(try await coordinator.undoHistory().isEmpty)
-    #expect(try FileManager.default.contentsOfDirectory(atPath: fixture.folder.path) == ["a.txt"])
-  }
-
-  @Test func replacementCanSucceedAndClarificationDoesNotMutate() async throws {
-    let fixture = try LanguageFixture()
-    defer { fixture.remove() }
-    try fixture.write("a.txt")
-    let coordinator = TaskCoordinator(bookmarkFile: fixture.bookmark)
-    _ = try await coordinator.selectFolderForWriting(fixture.folder)
-    let responses = ResponseSequence([
-      "{",
-      #"{"status":"plan","message":"","files":[{"sourceID":"f0","disposition":"change","folder":"Documents","name":"a.txt"}]}"#,
-    ])
-    let outcome = try await coordinator.planTask(
-      request: "Sort by type", model: { _, _, _ in await responses.next() })
-    guard case .plan(let plan) = outcome else {
-      Issue.record("Expected replacement plan")
-      return
-    }
-    #expect(plan.changedCount == 1)
-    #expect(await responses.count == 2)
-    let clarification = try await coordinator.planTask(
-      request: "Organize my files",
-      model: { _, _, _ in
-        Issue.record("Must clarify first")
-        return "{}"
-      })
-    guard case .clarification = clarification else {
-      Issue.record("Expected clarification")
-      return
-    }
-    let modelClarification = try await coordinator.planTask(
-      request: "Sort by type",
-      model: { _, _, _ in #"{"status":"clarification","message":"Which type grouping?","files":[]}"#
-      })
-    guard case .clarification = modelClarification else {
-      Issue.record("Expected model clarification")
-      return
-    }
-    #expect(try await coordinator.undoHistory().isEmpty)
-    #expect(try FileManager.default.contentsOfDirectory(atPath: fixture.folder.path) == ["a.txt"])
-  }
-
-  @Test func invalidEnvelopeGetsExactlyOneReplacementAndNeverMutates() async throws {
-    let fixture = try LanguageFixture()
-    defer { fixture.remove() }
-    try fixture.write("a.txt")
-    let coordinator = TaskCoordinator(bookmarkFile: fixture.bookmark)
-    _ = try await coordinator.selectFolderForWriting(fixture.folder)
-    let responses = ResponseSequence([
-      #"{"status":"plan","message":"","files":[{"sourceID":"f0","disposition":"change","folder":"Documents","name":"a.txt","delete":true}]}"#,
-      #"{"status":"plan","message":"","files":[]}"#,
-    ])
     await #expect(throws: PlanningError.invalidResponse) {
       try await coordinator.planTask(
         request: "Sort by type",
@@ -187,23 +137,63 @@ struct NaturalLanguageTests {
     #expect(try FileManager.default.contentsOfDirectory(atPath: fixture.folder.path) == ["a.txt"])
   }
 
-  @Test func mixedUnsupportedRequestDeclinesWholeWithoutCallingModel() async throws {
+  @Test func replacementCanSucceedAndClarificationDoesNotMutate() async throws {
     let fixture = try LanguageFixture()
     defer { fixture.remove() }
     try fixture.write("a.txt")
     let coordinator = TaskCoordinator(bookmarkFile: fixture.bookmark)
     _ = try await coordinator.selectFolderForWriting(fixture.folder)
+    let response = try metadataResponse(request: "Sort by type")
+    let responses = ResponseSequence(["{", response])
     let outcome = try await coordinator.planTask(
-      request: "Sort by type and delete duplicates",
+      request: "Sort by type", model: { _, _, _ in await responses.next() })
+    guard case .plan(let plan) = outcome else {
+      Issue.record("Expected replacement plan")
+      return
+    }
+    #expect(plan.changedCount == 1)
+    #expect(await responses.count == 2)
+    let clarification = try metadataResponse(
+      request: "Organize my files", status: "clarification", sort: "none", decisions: [],
+      message: "Which sorting rule would you like?")
+    let clarified = try await coordinator.planTask(
+      request: "Organize my files", model: { _, _, _ in clarification })
+    guard case .clarification = clarified else {
+      Issue.record("Expected clarification")
+      return
+    }
+    let unsupportedRequest = "Sort by type and translate these reports into French"
+    let refusal = try metadataResponse(
+      request: unsupportedRequest, status: "unsupported", sort: "none", decisions: [],
+      message: "Translation is not a metadata sorting or renaming task.")
+    let refused = try await coordinator.planTask(
+      request: unsupportedRequest, model: { _, _, _ in refusal })
+    guard case .unsupported = refused else {
+      Issue.record("Expected the model to decline the entire mixed request")
+      return
+    }
+    #expect(try await coordinator.undoHistory().isEmpty)
+    #expect(try FileManager.default.contentsOfDirectory(atPath: fixture.folder.path) == ["a.txt"])
+  }
+
+  @Test func mixedUnsupportedRequestDeclinesWholeWithoutPartialExecution() async throws {
+    let fixture = try LanguageFixture()
+    defer { fixture.remove() }
+    try fixture.write("a.txt")
+    let coordinator = TaskCoordinator(bookmarkFile: fixture.bookmark)
+    _ = try await coordinator.selectFolderForWriting(fixture.folder)
+    let request = "Sort by type and delete duplicates"
+    let outcome = try await coordinator.planTask(
+      request: request,
       model: { _, _, _ in
-        Issue.record("Unsupported request must not reach model")
+        Issue.record("A known unsupported action cannot be dropped by inference")
         return "{}"
       })
     guard case .unsupported(let reason) = outcome else {
       Issue.record("Must decline whole mixed request")
       return
     }
-    #expect(reason.contains("Sort by type"))
+    #expect(reason.contains("Resubmit"))
     #expect(try await coordinator.undoHistory().isEmpty)
     #expect(
       FileManager.default.fileExists(atPath: fixture.folder.appendingPathComponent("a.txt").path))
@@ -217,11 +207,11 @@ struct NaturalLanguageTests {
     }
     let coordinator = TaskCoordinator(bookmarkFile: fixture.bookmark)
     _ = try await coordinator.selectFolderForWriting(fixture.folder)
-    let outcome = try await coordinator.planTask(
-      request: "Rename files replacing spaces with hyphens",
-      model: { _, _, _ in
-        #"{"status":"plan","message":"","files":[{"sourceID":"f0","disposition":"change","folder":".","name":"Invoice-2026-10-28-AB123.TXT"},{"sourceID":"f1","disposition":"unchanged","folder":".","name":"Keep.pdf"},{"sourceID":"f2","disposition":"abstain","folder":".","name":"Unknown.xyz"}]}"#
-      })
+    let request = "Rename files replacing spaces with hyphens"
+    let response = try metadataResponse(
+      request: request, sort: "none", rename: [separatorRule(evidence: request)],
+      decisions: ["apply", "apply", "abstain"])
+    let outcome = try await coordinator.planTask(request: request, model: { _, _, _ in response })
     guard case .plan(let plan) = outcome else {
       Issue.record("Expected rename plan")
       return
@@ -245,12 +235,11 @@ struct NaturalLanguageTests {
     try fixture.write("Invoice 2026-10-28 AB123.txt")
     let coordinator = TaskCoordinator(bookmarkFile: fixture.bookmark)
     _ = try await coordinator.selectFolderForWriting(fixture.folder)
-    let response =
-      #"{"status":"plan","message":"","files":[{"sourceID":"f0","disposition":"change","folder":"Documents","name":"Invoice 2026-10-28 AB123.txt"}]}"#
-    let outcome = try await coordinator.planTask(
-      request: "Please organize my files by type", model: { _, _, _ in response })
+    let request = "Please organize my files by type"
+    let response = try metadataResponse(request: request)
+    let outcome = try await coordinator.planTask(request: request, model: { _, _, _ in response })
     guard case .plan(let plan) = outcome else {
-      Issue.record("Expected a complete plan")
+      Issue.record("Expected complete plan")
       return
     }
     let result = try await coordinator.execute(plan)
@@ -262,6 +251,37 @@ struct NaturalLanguageTests {
         contentsOf: fixture.folder.appendingPathComponent("Invoice 2026-10-28 AB123.txt"),
         encoding: .utf8) == "fixture")
   }
+}
+
+func metadataResponse(
+  request: String, status: String = "plan", sort: String = "type", value: String = "",
+  rename: [[String: String]] = [], decisions: [String] = ["apply"], message: String = "",
+  selection: [String: Any]? = nil, clauses: [[String: String]]? = nil
+) throws -> String {
+  let object: [String: Any] = [
+    "status": status, "message": message,
+    "clauses": clauses ?? [
+      [
+        "text": request,
+        "effect": status == "clarification"
+          ? "ambiguous"
+          : status == "unsupported" ? "unsupported" : sort == "none" ? "rename" : "sort",
+      ]
+    ],
+    "sort": ["kind": sort, "evidence": sort == "none" ? "" : request, "value": value],
+    "rename": rename,
+    "selection": selection ?? ["extensions": [String](), "nameContains": "", "evidence": ""],
+    "files": decisions.enumerated().map {
+      ["sourceID": "f\($0.offset)", "disposition": $0.element]
+    },
+  ]
+  return String(
+    decoding: try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]),
+    as: UTF8.self)
+}
+
+func separatorRule(evidence: String, from: String = " ", to: String = "-") -> [String: String] {
+  ["kind": "separator", "evidence": evidence, "value": to, "from": from]
 }
 
 actor ResponseSequence {
