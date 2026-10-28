@@ -150,6 +150,25 @@ struct ModelSmoke {
       "Offline TaskCoordinator metadata task passed: 2 changes, 1 abstention, reopened undo verified; seconds: \(start.duration(to: .now))"
     )
     await reportMetrics(runtime)
+    for index in 0..<300 {
+      try Data("non-sensitive bound fixture".utf8).write(
+        to: folder.appendingPathComponent(
+          "Synthetic-long-metadata-document-2026-10-28-ID\(index).txt"))
+    }
+    _ = try await coordinator.selectFolderForWriting(grantedFolder)
+    do {
+      _ = try await coordinator.planTask(request: "Sort by type") { system, user, limit in
+        try await runtime.completeJSON(system: system, user: user, maximumOutputTokens: limit)
+      }
+      throw LocalInferenceError.smokeCheckFailed
+    } catch LocalInferenceError.contextLimit {
+      guard try await coordinator.undoHistory().allSatisfy({ $0.state == .undone }),
+        try FileManager.default.contentsOfDirectory(atPath: folder.path).count == 303
+      else { throw LocalInferenceError.smokeCheckFailed }
+      print(
+        "Oversized real metadata plan rejected at native context bound; no partial plan or mutations"
+      )
+    }
   }
 
   static func reportMetrics(_ runtime: MLXLocalModelRuntime) async {

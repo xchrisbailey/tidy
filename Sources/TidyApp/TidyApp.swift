@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import TidyCore
+import TidyModelRuntime
 
 @main
 struct TidyApp: App {
@@ -254,7 +255,14 @@ private struct InventoryView: View {
       }
       let runtime = ModelServices.shared.runtime
       let outcome = try await coordinator.planTask(request: submitted) { system, user, limit in
-        try await runtime.completeJSON(system: system, user: user, maximumOutputTokens: limit)
+        do {
+          return try await runtime.completeJSON(
+            system: system, user: user, maximumOutputTokens: limit)
+        } catch LocalInferenceError.contextLimit {
+          throw PlanningError.requestTooLarge
+        } catch LocalInferenceError.outputLimit {
+          throw PlanningError.requestTooLarge
+        }
       }
       guard case .plan(let plan) = outcome else {
         switch outcome {
