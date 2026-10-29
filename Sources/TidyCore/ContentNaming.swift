@@ -197,11 +197,12 @@ private enum ContentNameRejection: Error {
   var feedback: String {
     let reason =
       switch self {
-      case .schema: "The response shape or source ID was invalid. Follow the exact JSON schema."
+      case .schema:
+        "The response shape, source ID or heading index was invalid. Follow the documented schema; choose an existing zero-based headingIndex when headings are provided."
       case .title:
         "The title was not grounded in the evidence. Copy a short heading using ONLY words actually present in untrustedEvidence, preserving their spelling. Do not correct OCR, translate words or copy the original filename into title. The app preserves dates, IDs and original words separately."
       case .name:
-        "The supplied filename failed grounding or preservation. Return the documented title-only decision without a name field. Use source words for the title; the app preserves exact original words, dates, IDs and extension."
+        "The supplied filename failed grounding or preservation. Return a documented decision without a name field: select an existing headingIndex if headings are provided, otherwise use a grounded source-word title. The app preserves exact original words, dates, IDs and extension."
       case .repetition:
         "The generated heading or filename repeats a phrase not repeated in the source. Return the short descriptive heading ONCE; the app adds missing preservation tokens."
       }

@@ -6,7 +6,7 @@ enum IntentViolation: String, Error {
   case envelope =
     "Use the complete documented envelope; clarification/unsupported has no rules or files."
   case sources =
-    "For a plan include every provided sourceID exactly once, with apply or abstain; message must be empty and an action is required."
+    "For a plan use files: \"all\" so the app expands every captured source; do not invent source IDs. message must be empty and an action is required."
   case sort =
     "If sorting or moving was NOT requested, sort.kind MUST be none, with evidence/value empty. Do not copy type from the example into a rename-only task. Otherwise use a documented sort kind with exact request evidence for the sorting action and type, date source/precision, or quoted folder literal."
   case rename =
