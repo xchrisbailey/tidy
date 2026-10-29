@@ -40,7 +40,7 @@ let package = Package(
       dependencies: [
         "TidyCore", "TidyModel", "TidyModelRuntime",
         .product(name: "MLX", package: "mlx-swift"),
-      ]),
+      ], resources: [.copy("QualificationCorpus.json")]),
     .testTarget(name: "TidyCoreTests", dependencies: ["TidyCore"]),
     .testTarget(name: "TidyInspectionTests", dependencies: ["TidyInspection"]),
     .testTarget(name: "TidyModelTests", dependencies: ["TidyModel"]),

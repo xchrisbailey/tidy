@@ -37,6 +37,11 @@ struct ModelSmoke {
     print("Native verified load + readiness check seconds: \(started.duration(to: .now))")
     reportMemory("loaded")
     await reportMetrics(runtime)
+    if CommandLine.arguments.contains("--qualify-v1") {
+      try await qualification(runtime, loadingTime: started.duration(to: .now))
+      await runtime.unload()
+      return
+    }
     if CommandLine.arguments.contains("--ocr-evidence-only") {
       try await ocrNamingSmoke(runtime)
       await runtime.unload()
