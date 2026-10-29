@@ -6,6 +6,34 @@ import TidyCore
 
 @Suite(.serialized)
 struct OCRNamingTests {
+  @Test func fusedOCRIdentifierAndDateAbstainsInsteadOfGuessingBoundaries() async throws {
+    let fixture = try LanguageFixture()
+    defer { fixture.remove() }
+    let bytes = try rasterFixture("Juniper Invoice JW0752026-11-09")
+    try bytes.write(to: fixture.folder.appendingPathComponent("scan.png"))
+    let coordinator = TaskCoordinator(bookmarkFile: fixture.bookmark)
+    _ = try await coordinator.selectFolderForWriting(fixture.folder)
+    let request = "Give files readable names from contents"
+    let intent = try metadataResponse(
+      request: request, sort: "none",
+      rename: [["kind": "content", "evidence": request, "value": "", "from": ""]])
+    let outcome = try await coordinator.planTask(request: request) { _, input, _ in
+      if input.contains("untrustedEvidence") {
+        Issue.record("Ambiguous OCR token boundaries must not be guessed by inference")
+        return #"{"files":[{"sourceID":"f0","title":"Juniper Invoice","disposition":"apply"}]}"#
+      }
+      return intent
+    }
+    guard case .plan(let plan) = outcome else {
+      Issue.record("Expected abstention")
+      return
+    }
+    #expect(plan.changes.isEmpty)
+    #expect(plan.abstained.first?.inspectionCode == .insufficient)
+    #expect(try Data(contentsOf: fixture.folder.appendingPathComponent("scan.png")) == bytes)
+    #expect(try await coordinator.undoHistory().isEmpty)
+  }
+
   @Test func nativeImagesShareAggregateCompressedInputBudget() async throws {
     let fixture = try LanguageFixture()
     defer { fixture.remove() }

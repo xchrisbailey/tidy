@@ -30,6 +30,24 @@ func translatedDescriptors(in text: String, language: String) -> [String] {
   }
 }
 
+func translatedContentTitle(_ title: String, original: String, language: String) -> String {
+  var result = title
+  let protected = Set(
+    original.lowercased().components(separatedBy: CharacterSet.alphanumerics.inverted))
+  for group in descriptors {
+    guard let target = group[language] else { continue }
+    for source in Set(group.values)
+    where source != target && !protected.contains(source.lowercased()) {
+      let pattern =
+        #"(?<![\p{L}\p{M}\p{N}])"# + NSRegularExpression.escapedPattern(for: source)
+        + #"(?![\p{L}\p{M}\p{N}])"#
+      result = result.replacingOccurrences(
+        of: pattern, with: target, options: [.regularExpression, .caseInsensitive])
+    }
+  }
+  return result
+}
+
 func descriptorLanguageMatches(_ text: String, original: String, language: String) -> Bool {
   guard language != "und" else { return true }
   let words = Set(text.lowercased().components(separatedBy: CharacterSet.alphanumerics.inverted))

@@ -3,6 +3,66 @@ import Testing
 import TidyCore
 
 struct NaturalLanguageTests {
+  @Test(arguments: [1_000, 1_001])
+  func compactIntentRetainsWholeScopeCeiling(count: Int) async throws {
+    let fixture = try LanguageFixture()
+    defer { fixture.remove() }
+    for index in 0..<count { try fixture.write("file-\(index).txt") }
+    let coordinator = TaskCoordinator(bookmarkFile: fixture.bookmark)
+    _ = try await coordinator.selectFolderForWriting(fixture.folder)
+    let response = try metadataResponse(request: "Sort by type", decisions: [])
+      .replacingOccurrences(of: "\"files\":[]", with: "\"files\":\"all\"")
+    if count == 1_001 {
+      await #expect(throws: SortError.scopeTooLarge) {
+        try await coordinator.planTask(request: "Sort by type") { _, _, _ in
+          Issue.record("Oversized scope must not reach inference")
+          return response
+        }
+      }
+    } else {
+      let outcome = try await coordinator.planTask(request: "Sort by type") { _, input, _ in
+        #expect(input.utf8.count < 1_024)
+        return response
+      }
+      guard case .plan(let plan) = outcome else {
+        Issue.record("Expected whole plan")
+        return
+      }
+      #expect(plan.changedCount == 1_000)
+      #expect(plan.requiresConfirmation)
+    }
+    #expect(try await coordinator.undoHistory().isEmpty)
+    #expect(try FileManager.default.contentsOfDirectory(atPath: fixture.folder.path).count == count)
+  }
+
+  @Test func compactIntentExpandsEveryCapturedFileBeforeAnyMutation() async throws {
+    let fixture = try LanguageFixture()
+    defer { fixture.remove() }
+    for index in 0..<100 { try fixture.write("Download \(index).txt") }
+    let coordinator = TaskCoordinator(bookmarkFile: fixture.bookmark)
+    _ = try await coordinator.selectFolderForWriting(fixture.folder)
+    let response = try metadataResponse(request: "Sort by type", decisions: [])
+      .replacingOccurrences(of: "\"files\":[]", with: "\"files\":\"all\"")
+    let outcome = try await coordinator.planTask(request: "Sort by type") { _, input, _ in
+      // The runtime boundary must stay bounded independently of the selected inventory size.
+      #expect(input.utf8.count < 1_024)
+      return response
+    }
+    guard case .plan(let plan) = outcome else {
+      Issue.record("Expected full plan")
+      return
+    }
+    #expect(plan.changedCount == 100)
+    #expect(plan.moveCount == 100)
+    #expect(plan.renameCount == 0)
+    #expect(!plan.requiresConfirmation)
+    #expect(try FileManager.default.contentsOfDirectory(atPath: fixture.folder.path).count == 100)
+    let result = try await coordinator.execute(plan)
+    #expect(result.changed.count == 100)
+    try await TaskCoordinator(bookmarkFile: fixture.bookmark).undoTask(plan.id)
+    #expect(try FileManager.default.contentsOfDirectory(atPath: fixture.folder.path).count == 100)
+  }
+
   @Test func successiveModelRenameAndSortRequireNewestUndoFirst() async throws {
     let fixture = try LanguageFixture()
     defer { fixture.remove() }
@@ -47,7 +107,9 @@ struct NaturalLanguageTests {
     let request = "Rename files replacing spaces with hyphens"
     let response = try metadataResponse(
       request: request, sort: "none", rename: [separatorRule(evidence: request)],
-      decisions: Array(repeating: "apply", count: 101))
+      decisions: []
+    )
+    .replacingOccurrences(of: "\"files\":[]", with: "\"files\":\"all\"")
     let outcome = try await coordinator.planTask(request: request, model: { _, _, _ in response })
     guard case .plan(let plan) = outcome else {
       Issue.record("Expected rename plan")

@@ -312,13 +312,14 @@ struct RecursiveScopeTests {
     let coordinator = TaskCoordinator(bookmarkFile: fixture.bookmark)
     _ = try await coordinator.selectFolderForWriting(fixture.folder)
     let request = "Sort by type including subfolders"
-    let response = try metadataResponse(request: request, decisions: ["apply", "apply", "apply"])
+    let response = try metadataResponse(request: request, decisions: [])
+      .replacingOccurrences(of: "\"files\":[]", with: "\"files\":\"all\"")
     let outcome = try await coordinator.planTask(
       request: request,
       model: { _, input, _ in
         let object = try JSONSerialization.jsonObject(with: Data(input.utf8))
-        let metadata = (object as? [String: Any])?["metadata"] as? [[String: Any]]
-        #expect(metadata?.count == 3)
+        #expect((object as? [String: Any])?["request"] as? String == request)
+        #expect((object as? [String: Any])?["metadata"] == nil)
         return response
       })
     guard case .plan(let plan) = outcome else {

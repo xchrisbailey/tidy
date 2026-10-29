@@ -3,6 +3,156 @@ import Testing
 import TidyCore
 
 struct ContentNamingTests {
+  @Test func titleAssemblyAbstainsWhenRequestedTranslationHasNoGroundedVocabulary() async throws {
+    let fixture = try LanguageFixture()
+    defer { fixture.remove() }
+    try Data(
+      "Juniper Maintenance Notes\nThese maintenance notes describe repairs to garden equipment. The team reviewed the planned work before starting."
+        .utf8
+    )
+    .write(to: fixture.folder.appendingPathComponent("scan.txt"))
+    let coordinator = TaskCoordinator(bookmarkFile: fixture.bookmark)
+    _ = try await coordinator.selectFolderForWriting(fixture.folder)
+    let request = "Give files readable names from contents in German"
+    let intent = try metadataResponse(
+      request: request, sort: "none",
+      rename: [["kind": "content", "evidence": request, "value": "German", "from": ""]])
+    let sequence = ResponseSequence([
+      intent,
+      #"{"files":[{"sourceID":"f0","title":"Juniper Maintenance Notes","disposition":"apply"}]}"#,
+    ])
+    let outcome = try await coordinator.planTask(request: request) { _, _, _ in
+      await sequence.next()
+    }
+    guard case .plan(let plan) = outcome else {
+      Issue.record("Expected abstention")
+      return
+    }
+    #expect(plan.changes.isEmpty)
+    #expect(plan.abstained.first?.inspectionCode == .insufficient)
+    #expect(try await coordinator.undoHistory().isEmpty)
+  }
+
+  @Test func compactNamingCannotTreatInvalidNameAsOmittedOrResetReplacementBudget() async throws {
+    let fixture = try LanguageFixture()
+    defer { fixture.remove() }
+    try Data(
+      "Juniper Maintenance Notes\nThe maintenance notes describe repairs to garden equipment.".utf8
+    )
+    .write(to: fixture.folder.appendingPathComponent("scan.txt"))
+    let coordinator = TaskCoordinator(bookmarkFile: fixture.bookmark)
+    _ = try await coordinator.selectFolderForWriting(fixture.folder)
+    let request = "Give files readable names from contents"
+    let intent = try metadataResponse(
+      request: request, sort: "none",
+      rename: [["kind": "content", "evidence": request, "value": "", "from": ""]], decisions: []
+    )
+    .replacingOccurrences(of: "\"files\":[]", with: "\"files\":\"all\"")
+    let sequence = ResponseSequence([
+      "{", intent,
+      #"{"files":[{"sourceID":"f0","title":"Juniper Maintenance Notes","name":null,"disposition":"apply"}]}"#,
+    ])
+    await #expect(throws: PlanningError.invalidResponse) {
+      try await coordinator.planTask(request: request) { _, _, _ in await sequence.next() }
+    }
+    #expect(await sequence.count == 3)
+    #expect(try await coordinator.undoHistory().isEmpty)
+    #expect(
+      try FileManager.default.contentsOfDirectory(atPath: fixture.folder.path) == ["scan.txt"])
+  }
+
+  @Test func redundantGeneratedHeadingRequiresOneReplacementBeforeAnyMutation() async throws {
+    let fixture = try LanguageFixture()
+    defer { fixture.remove() }
+    try Data(
+      "Juniper Maintenance Notes\nThe maintenance notes describe repairs to garden equipment.".utf8
+    )
+    .write(to: fixture.folder.appendingPathComponent("scan.txt"))
+    let coordinator = TaskCoordinator(bookmarkFile: fixture.bookmark)
+    _ = try await coordinator.selectFolderForWriting(fixture.folder)
+    let request = "Give files readable names from contents"
+    let intent = try metadataResponse(
+      request: request, sort: "none",
+      rename: [["kind": "content", "evidence": request, "value": "", "from": ""]])
+    let sequence = ResponseSequence([
+      intent,
+      #"{"files":[{"sourceID":"f0","title":"Juniper Maintenance Notes Juniper Maintenance Notes","disposition":"apply"}]}"#,
+      #"{"files":[{"sourceID":"f0","title":"Juniper Maintenance Notes","disposition":"apply"}]}"#,
+    ])
+    let outcome = try await coordinator.planTask(request: request) { _, _, _ in
+      let names = try FileManager.default.contentsOfDirectory(atPath: fixture.folder.path)
+      #expect(names == ["scan.txt"])
+      return await sequence.next()
+    }
+    guard case .plan(let plan) = outcome else {
+      Issue.record("Expected replacement")
+      return
+    }
+    #expect(plan.changes.first?.destinationName == "Juniper Maintenance Notes.txt")
+    #expect(await sequence.count == 3)
+    #expect(try await coordinator.undoHistory().isEmpty)
+  }
+
+  @Test func groundedTitleAssemblyUsesOnlyAuthorizedDescriptorTranslation() async throws {
+    let fixture = try LanguageFixture()
+    defer { fixture.remove() }
+    try Data(
+      "Northwind Invoice NW020 2026-11-12\nThis invoice covers repair services provided during November."
+        .utf8
+    )
+    .write(to: fixture.folder.appendingPathComponent("scan.txt"))
+    let coordinator = TaskCoordinator(bookmarkFile: fixture.bookmark)
+    _ = try await coordinator.selectFolderForWriting(fixture.folder)
+    let request = "Give files readable names from contents in Spanish"
+    let intent = try metadataResponse(
+      request: request, sort: "none",
+      rename: [["kind": "content", "evidence": request, "value": "Spanish", "from": ""]])
+    let sequence = ResponseSequence([
+      intent,
+      #"{"files":[{"sourceID":"f0","title":"Northwind Invoice","disposition":"apply"}]}"#,
+    ])
+    let outcome = try await coordinator.planTask(request: request) { _, _, _ in
+      await sequence.next()
+    }
+    guard case .plan(let plan) = outcome else {
+      Issue.record("Expected grounded translation")
+      return
+    }
+    #expect(plan.changes.first?.destinationName == "Northwind Factura NW020 2026-11-12.txt")
+    #expect(try await coordinator.undoHistory().isEmpty)
+  }
+
+  @Test func groundedTitleExpandsProtectedTokensOnceWithoutFilenameReconstruction() async throws {
+    let fixture = try LanguageFixture()
+    defer { fixture.remove() }
+    let original = "Warranty JW075.txt"
+    let bytes = Data(
+      "Juniper Warranty JW075 2026-11-09\nThis warranty covers the repaired garden equipment.".utf8)
+    try bytes.write(to: fixture.folder.appendingPathComponent(original))
+    let coordinator = TaskCoordinator(bookmarkFile: fixture.bookmark)
+    _ = try await coordinator.selectFolderForWriting(fixture.folder)
+    let request = "Give files readable names from contents"
+    let intent = try metadataResponse(
+      request: request, sort: "none",
+      rename: [["kind": "content", "evidence": request, "value": "", "from": ""]])
+    let sequence = ResponseSequence([
+      intent,
+      #"{"files":[{"sourceID":"f0","title":"Juniper Warranty","disposition":"apply"}]}"#,
+    ])
+    let outcome = try await coordinator.planTask(request: request) { _, _, _ in
+      await sequence.next()
+    }
+    guard case .plan(let plan) = outcome else {
+      Issue.record("Expected complete content plan")
+      return
+    }
+    #expect(plan.changes.first?.destinationName == "Juniper Warranty JW075 2026-11-09.txt")
+    #expect(try await coordinator.undoHistory().isEmpty)
+    #expect(try await coordinator.execute(plan).changed.count == 1)
+    try await TaskCoordinator(bookmarkFile: fixture.bookmark).undoTask(plan.id)
+    #expect(try Data(contentsOf: fixture.folder.appendingPathComponent(original)) == bytes)
+  }
+
   @Test(arguments: ["normal", "link", "replacedAncestor"])
   func recursiveContentNamingUsesCapturedAncestorAuthorityAndPreservesParent(kind: String)
     async throws

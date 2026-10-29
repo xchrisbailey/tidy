@@ -159,6 +159,8 @@ extension ModelSmoke {
         print(
           "QUAL \(fixture.id) changes=\(plan.changes.count) abstained=\(plan.abstained.count) unchanged=\(plan.unchanged.count) skipped=\(plan.skipped.count) codes=\(plan.abstained.compactMap(\.inspectionCode).map(\.rawValue)) byteAndUndo=pass seconds=\(start.duration(to: .now))"
         )
+        print("QUAL \(fixture.id) last successful completion metrics (not whole-task totals):")
+        await reportMetrics(runtime)
       } catch {
         errors += 1
         print(

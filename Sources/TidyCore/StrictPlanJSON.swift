@@ -12,17 +12,25 @@ func strictPlanJSON(_ text: String) -> Bool {
     rename.allSatisfy({ Set($0.keys) == ["kind", "evidence", "value", "from"] }),
     let selection = envelope["selection"] as? [String: Any],
     Set(selection.keys) == ["extensions", "nameContains", "evidence"],
-    let files = envelope["files"] as? [[String: Any]],
-    files.allSatisfy({ Set($0.keys) == ["sourceID", "disposition"] })
+    validPlanFiles(envelope["files"])
   else { return false }
   return uniqueJSONKeys(data)
+}
+
+private func validPlanFiles(_ value: Any?) -> Bool {
+  if value as? String == "all" { return true }
+  guard let files = value as? [[String: Any]] else { return false }
+  return files.allSatisfy { Set($0.keys) == ["sourceID", "disposition"] }
 }
 
 func strictNamingJSON(_ text: String) -> Bool {
   let data = Data(text.utf8)
   guard let envelope = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
     Set(envelope.keys) == ["files"], let files = envelope["files"] as? [[String: Any]],
-    files.allSatisfy({ Set($0.keys) == ["sourceID", "title", "name", "disposition"] })
+    files.allSatisfy({
+      (Set($0.keys) == ["sourceID", "title", "name", "disposition"] && $0["name"] is String)
+        || Set($0.keys) == ["sourceID", "title", "disposition"]
+    })
   else { return false }
   return uniqueJSONKeys(data)
 }

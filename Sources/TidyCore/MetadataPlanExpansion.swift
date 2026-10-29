@@ -13,8 +13,6 @@ extension TaskCoordinator {
     let journal = try OperationJournal(directory: bookmarkFile.deletingLastPathComponent())
     _ = try journal.load()
     let candidates = inventory.candidateFiles.sorted { $0.name < $1.name }
-    let decisions = Dictionary(
-      uniqueKeysWithValues: intent.files.map { ($0.sourceID, $0.disposition) })
     var proposals: [(InventoryItem, String, String)] = []
     var unchanged: [FileOutcome] = []
     var abstained: [FileOutcome] = []
@@ -33,7 +31,7 @@ extension TaskCoordinator {
             explanation: "Outside the requested metadata selection; left unchanged."))
         continue
       }
-      guard decisions["f\(index)"] == "apply",
+      guard intent.applies(to: "f\(index)"),
         let folder = metadataFolder(intent.sort, item: item),
         let name = intent.rename.contains(where: { $0.kind == "content" })
           ? contentNames["f\(index)"]?.name : metadataName(intent.rename, item: item)

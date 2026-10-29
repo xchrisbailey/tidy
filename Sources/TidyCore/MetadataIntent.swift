@@ -17,7 +17,7 @@ enum IntentViolation: String, Error {
     "Each clause must correspond to an actual declared rule or a preservation constraint; do not hide unsupported actions."
 }
 
-struct MetadataIntent: Codable {
+struct MetadataIntent: Decodable {
   let status: String
   let message: String
   let clauses: [Clause]
@@ -25,6 +25,32 @@ struct MetadataIntent: Codable {
   let rename: [RenameRule]
   let selection: Selection
   let files: [Decision]
+  let appliesToAll: Bool
+
+  enum CodingKeys: String, CodingKey {
+    case status, message, clauses, sort, rename, selection, files
+  }
+
+  init(from decoder: Decoder) throws {
+    let values = try decoder.container(keyedBy: CodingKeys.self)
+    status = try values.decode(String.self, forKey: .status)
+    message = try values.decode(String.self, forKey: .message)
+    clauses = try values.decode([Clause].self, forKey: .clauses)
+    sort = try values.decode(SortRule.self, forKey: .sort)
+    rename = try values.decode([RenameRule].self, forKey: .rename)
+    selection = try values.decode(Selection.self, forKey: .selection)
+    if let coverage = try? values.decode(String.self, forKey: .files), coverage == "all" {
+      appliesToAll = true
+      files = []
+    } else {
+      appliesToAll = false
+      files = try values.decode([Decision].self, forKey: .files)
+    }
+  }
+
+  func applies(to sourceID: String) -> Bool {
+    appliesToAll || files.contains { $0.sourceID == sourceID && $0.disposition == "apply" }
+  }
 
   struct Clause: Codable {
     let text: String
@@ -69,6 +95,7 @@ struct MetadataIntent: Codable {
     else { throw IntentViolation.coverage }
     if status != "plan" {
       guard ["unsupported", "clarification"].contains(status), !message.isEmpty, files.isEmpty,
+        !appliesToAll,
         sort.kind == "none", sort.evidence.isEmpty, sort.value.isEmpty, rename.isEmpty,
         selection.extensions.isEmpty, selection.nameContains.isEmpty, selection.evidence.isEmpty
       else { throw IntentViolation.envelope }
@@ -76,7 +103,7 @@ struct MetadataIntent: Codable {
     }
     guard message.isEmpty,
       !clauses.contains(where: { ["unsupported", "ambiguous"].contains($0.effect) }),
-      files.count == sourceIDs.count, Set(files.map(\.sourceID)) == sourceIDs,
+      appliesToAll || (files.count == sourceIDs.count && Set(files.map(\.sourceID)) == sourceIDs),
       files.allSatisfy({ ["apply", "abstain"].contains($0.disposition) }),
       sort.kind != "none" || !rename.isEmpty
     else { throw IntentViolation.sources }
