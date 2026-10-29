@@ -3,13 +3,17 @@ set -euo pipefail
 bin_path="$1"
 app="$2"
 service="$app/Contents/XPCServices/dev.tidy.inspection.xpc"
-mkdir -p "$service/Contents/MacOS"
+mkdir -p "$service/Contents/MacOS" "$service/Contents/Resources"
+mkdir -p "$service/Contents/Helpers"
 cp "$bin_path/TidyInspectionService" "$service/Contents/MacOS/"
-cp "$bin_path/TidyInspectionHelper" "$service/Contents/MacOS/"
+cp "$bin_path/TidyInspectionHelper" "$service/Contents/Helpers/"
 cp Packaging/InspectionService-Info.plist "$service/Contents/Info.plist"
 # launchd starts this service independently of the app's sandbox. It installs a stricter
 # profile before accepting IPC; its parser child inherits that profile, not the app's grants.
-codesign --force --sign - "$service/Contents/MacOS/TidyInspectionHelper"
+# The service-associated MacOS layout crashed native Metal archive-cache initialization under
+# this profile. The separate Helpers layout passes real packaged OCR without cache-write grants.
+rm -f "$service/Contents/MacOS/TidyInspectionHelper"
+codesign --force --sign - "$service/Contents/Helpers/TidyInspectionHelper"
 codesign --force --sign - "$service"
 codesign --verify --deep --strict "$service"
 # Remove only our previous, generated NSTask-helper artifact when repackaging in place.

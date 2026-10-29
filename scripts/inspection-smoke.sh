@@ -14,13 +14,13 @@ codesign --verify --deep --strict "$app"
 if [[ "${1:-}" == "--fixture-workers" ]]; then
   swift build --product TidyInspectionTestWorker
   service="$app/Contents/XPCServices/dev.tidy.inspection.xpc"
-  cp "$(swift build --show-bin-path)/TidyInspectionTestWorker" "$service/Contents/MacOS/TidyInspectionHelper"
-  codesign --force --sign - "$service/Contents/MacOS/TidyInspectionHelper"
+  cp "$(swift build --show-bin-path)/TidyInspectionTestWorker" "$service/Contents/Helpers/TidyInspectionHelper"
+  codesign --force --sign - "$service/Contents/Helpers/TidyInspectionHelper"
   codesign --force --sign - "$service"
   codesign --force --sign - --entitlements Packaging/InspectionSmoke.entitlements "$app"
-  for mode in hang cancel oversize crash containment; do
+  for mode in hang cancel oversize crash malformed badText containment; do
     "$app/Contents/MacOS/TidyModelSmoke" --inspection-only --worker-case "$mode"
-    python3 - "$service/Contents/MacOS/TidyInspectionHelper" <<'PY'
+    python3 - "$service/Contents/Helpers/TidyInspectionHelper" <<'PY'
 import subprocess, sys
 commands = subprocess.check_output(["ps", "-axo", "command="], text=True).splitlines()
 assert not any(line.startswith(sys.argv[1] + " ") or line == sys.argv[1] for line in commands), "parser worker remains alive"
@@ -28,7 +28,7 @@ PY
   done
   "$app/Contents/MacOS/TidyModelSmoke" --inspection-only --worker-case disconnect &
   parent=$!
-  python3 - "$service/Contents/MacOS/TidyInspectionHelper" <<'PY'
+  python3 - "$service/Contents/Helpers/TidyInspectionHelper" <<'PY'
 import subprocess, sys, time
 for _ in range(100):
     commands = subprocess.check_output(["ps", "-axo", "command="], text=True).splitlines()
@@ -39,7 +39,7 @@ else:
     raise AssertionError("disconnect probe did not start a parser")
 PY
   wait "$parent"
-  python3 - "$service/Contents/MacOS/TidyInspectionHelper" <<'PY'
+  python3 - "$service/Contents/Helpers/TidyInspectionHelper" <<'PY'
 import subprocess, sys, time
 for _ in range(100):
     commands = subprocess.check_output(["ps", "-axo", "command="], text=True).splitlines()

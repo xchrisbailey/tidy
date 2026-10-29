@@ -27,17 +27,19 @@ extension ModelSmoke {
     guard result < 0, errno == EPERM else { throw LocalInferenceError.smokeCheckFailed }
   }
 
-  static func controlledPDFSmoke(workerCase: String? = nil) async throws {
+  static func controlledPDFSmoke(workerCase: String? = nil, format: String = "pdf") async throws {
     try requireOfflineNetworkDenial()
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(
       "tidy-inspection-\(UUID())")
     let folder = root.appendingPathComponent("Selected")
     try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: root) }
+    let ext = format == "png" ? "png" : "pdf"
+    let lines = ["Acme Invoice AB123 2026-10-28"]
     let original =
       try workerCase.map { Data("%PDF-TIDY \($0)".utf8) }
-      ?? syntheticPDF(["Acme Invoice AB123 2026-10-28"])
-    let source = folder.appendingPathComponent("scan.pdf")
+      ?? (format == "pdf" ? syntheticPDF(lines) : syntheticOCR(lines, scanned: format == "scan"))
+    let source = folder.appendingPathComponent("scan.\(ext)")
     try original.write(to: source)
     let bookmark = root.appendingPathComponent("settings/folder.bookmark")
     let coordinator = TaskCoordinator(bookmarkFile: bookmark)
@@ -53,7 +55,9 @@ extension ModelSmoke {
       try await coordinator.planTask(request: request) { _, user, _ in
         if user.contains("untrustedEvidence") {
           return
-            #"{"files":[{"sourceID":"f0","title":"Acme Invoice AB123 2026-10-28","name":"Acme Invoice AB123 2026-10-28.pdf","disposition":"apply"}]}"#
+            """
+            {"files":[{"sourceID":"f0","title":"Acme Invoice AB123 2026-10-28","name":"Acme Invoice AB123 2026-10-28.\(ext)","disposition":"apply"}]}
+            """
         }
         return """
           {"status":"plan","message":"","clauses":[{"text":"\(request)","effect":"rename"}],"sort":{"kind":"none","evidence":"","value":""},"rename":[{"kind":"content","evidence":"\(request)","value":"","from":""}],"selection":{"extensions":[],"nameContains":"","evidence":""},"files":[{"sourceID":"f0","disposition":"apply"}]}
@@ -101,7 +105,7 @@ extension ModelSmoke {
       throw LocalInferenceError.smokeCheckFailed
     }
     guard try await coordinator.execute(plan).changed.count == 1,
-      try Data(contentsOf: folder.appendingPathComponent("Acme Invoice AB123 2026-10-28.pdf"))
+      try Data(contentsOf: folder.appendingPathComponent("Acme Invoice AB123 2026-10-28.\(ext)"))
         == original
     else { throw LocalInferenceError.smokeCheckFailed }
     try await TaskCoordinator(bookmarkFile: bookmark).undoTask(plan.id)
@@ -111,7 +115,8 @@ extension ModelSmoke {
     print(
       workerCase == "containment"
         ? "Packaged parser profile denied file read, persistent write and network connection; coordinator result and undo passed"
-        : "Packaged native PDF coordinator rename, byte preservation and reopened undo passed")
+        : "Packaged native \(format) coordinator rename, byte preservation and reopened undo passed"
+    )
   }
 
   static func pdfNamingSmoke(_ runtime: MLXLocalModelRuntime) async throws {
@@ -152,14 +157,17 @@ extension ModelSmoke {
   }
 
   static func pdfNamingExample(
-    _ runtime: MLXLocalModelRuntime, label: String, lines: [String], required: [String]
+    _ runtime: MLXLocalModelRuntime, label: String, lines: [String], required: [String],
+    ocrFormat: String? = nil
   ) async throws {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent("tidy-pdf-\(UUID())")
     let folder = root.appendingPathComponent("Selected")
     try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: root) }
-    let original = try syntheticPDF(lines)
-    let source = folder.appendingPathComponent("scan.pdf")
+    let ext = ocrFormat == "png" ? "png" : "pdf"
+    let original =
+      try ocrFormat.map { try syntheticOCR(lines, scanned: $0 == "pdf") } ?? syntheticPDF(lines)
+    let source = folder.appendingPathComponent("scan.\(ext)")
     try original.write(to: source)
     let bookmark = root.appendingPathComponent("settings/folder.bookmark")
     let coordinator = TaskCoordinator(bookmarkFile: bookmark)
@@ -173,7 +181,9 @@ extension ModelSmoke {
     _ = try await coordinator.selectFolderForWriting(granted)
     let started = ContinuousClock.now
     let outcome = try await coordinator.planTask(
-      request: "Give PDFs readable names based on their contents"
+      request: ext == "pdf"
+        ? "Give PDFs readable names based on their contents"
+        : "Give files readable names based on their contents"
     ) {
       system, user, limit in
       try await runtime.completeJSON(system: system, user: user, maximumOutputTokens: limit)
@@ -184,7 +194,7 @@ extension ModelSmoke {
       required.allSatisfy({ token in
         changed.destinationName.range(of: token, options: .caseInsensitive) != nil
       }),
-      changed.destinationName.hasSuffix(".pdf"),
+      changed.destinationName.hasSuffix(".\(ext)"),
       try Data(contentsOf: folder.appendingPathComponent(changed.destinationName)) == original
     else { throw LocalInferenceError.smokeCheckFailed }
     try await TaskCoordinator(bookmarkFile: bookmark).undoTask(plan.id)
@@ -192,7 +202,7 @@ extension ModelSmoke {
       throw LocalInferenceError.smokeCheckFailed
     }
     print(
-      "Offline native PDF \(label) naming passed: preserved bytes/date/ID/extension/language and reopened undo; seconds: \(started.duration(to: .now))"
+      "Offline native evidence \(label) naming passed: preserved bytes/date/ID/extension/language and reopened undo; seconds: \(started.duration(to: .now))"
     )
     await reportMetrics(runtime)
   }

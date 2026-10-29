@@ -12,6 +12,10 @@ struct ModelSmoke {
       let index = CommandLine.arguments.firstIndex(of: "--worker-case")
       let workerCase = index.map { CommandLine.arguments[$0 + 1] }
       try await controlledPDFSmoke(workerCase: workerCase)
+      if workerCase == nil {
+        try await controlledPDFSmoke(format: "png")
+        try await controlledPDFSmoke(format: "scan")
+      }
       return
     }
     let runtime = MLXLocalModelRuntime()
@@ -33,6 +37,11 @@ struct ModelSmoke {
     print("Native verified load + readiness check seconds: \(started.duration(to: .now))")
     reportMemory("loaded")
     await reportMetrics(runtime)
+    if CommandLine.arguments.contains("--ocr-evidence-only") {
+      try await ocrNamingSmoke(runtime)
+      await runtime.unload()
+      return
+    }
     if CommandLine.arguments.contains("--pdf-evidence-only") {
       try await pdfNamingSmoke(runtime)
       await runtime.unload()
@@ -86,6 +95,7 @@ struct ModelSmoke {
     reportMemory("after generation")
     await reportMetrics(runtime)
     try await pdfNamingSmoke(runtime)
+    try await ocrNamingSmoke(runtime)
     try await contentNamingSmoke(runtime)
     try await taskCoordinationSmoke(runtime)
     try await recursiveTaskSmoke(runtime)

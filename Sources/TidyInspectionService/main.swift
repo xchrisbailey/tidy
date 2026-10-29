@@ -30,9 +30,13 @@ final class Service: NSObject, InspectionServiceProtocol, @unchecked Sendable {
   private let lock = NSLock()
   private var request: (String, Request)?
 
-  func inspectPDF(_ input: Data, requestID: String, withReply reply: @escaping (Data) -> Void) {
+  func inspectDocument(
+    _ input: Data, format: String, requestID: String, withReply reply: @escaping (Data) -> Void
+  ) {
     lock.lock()
-    guard request == nil, UUID(uuidString: requestID) != nil, input.count <= 20 * 1024 * 1024 else {
+    guard request == nil, UUID(uuidString: requestID) != nil, input.count <= 20 * 1024 * 1024,
+      ["pdf", "png", "jpg", "jpeg", "heic", "heif", "tif", "tiff"].contains(format)
+    else {
       lock.unlock()
       reply(Self.encoded("inputLimit"))
       return
@@ -44,9 +48,9 @@ final class Service: NSObject, InspectionServiceProtocol, @unchecked Sendable {
     let callback = Callback(reply)
     queue.async {
       let process = Process()
-      process.executableURL = Bundle.main.executableURL?.deletingLastPathComponent()
-        .appendingPathComponent("TidyInspectionHelper")
-      process.arguments = ["--inherited-containment"]
+      process.executableURL = Bundle.main.bundleURL.appendingPathComponent(
+        "Contents/Helpers/TidyInspectionHelper")
+      process.arguments = ["--format=\(format)", "--inherited-containment"]
       let output: Data
       do {
         output = try WorkerSupervisor.run(
@@ -112,8 +116,8 @@ func escaped(_ value: String) -> String {
 let bundle = Bundle.main.bundleURL.path
 let errorSink = FileHandle.nullDevice
 _ = errorSink.fileDescriptor
-let worker = Bundle.main.executableURL!.deletingLastPathComponent()
-  .appendingPathComponent("TidyInspectionHelper").path
+let worker = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/TidyInspectionHelper")
+  .path
 var core = rlimit(rlim_cur: 0, rlim_max: 0)
 guard setrlimit(RLIMIT_CORE, &core) == 0 else { exit(1) }
 let profile = """

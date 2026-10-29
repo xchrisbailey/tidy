@@ -62,7 +62,7 @@ private struct InventoryView: View {
       }
 
       Text(
-        "Inventory reads names and metadata, not file contents. When you request readable names from contents, Tidy reads supported UTF-8 .txt and .md files and text-based PDFs locally within inspection limits. PDF naming uses at most the first three pages; protected PDFs are not used. Unsupported contents stay unread. Sorting or renaming requires a separate write grant and runs immediately, without a plan preview."
+        "Inventory reads names and metadata, not file contents. When you request readable names from contents, Tidy reads UTF-8 .txt and .md files, PDFs and supported PNG, JPEG, HEIC/HEIF and single-image TIFF images locally within inspection limits. Native text recognition can supply evidence from images and scanned PDFs. PDF naming uses at most the first three pages, including recognition; protected PDFs are not used. Unsupported contents stay unread and insufficient evidence leaves files unchanged. Sorting or renaming requires a separate write grant and runs immediately, without a plan preview."
       )
       .font(.callout)
       Text(

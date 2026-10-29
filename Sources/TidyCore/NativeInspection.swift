@@ -2,7 +2,9 @@ import Darwin
 import Foundation
 import TidyInspection
 
-func inspectNativePDF(_ input: Data, budget: inout InspectionBudget) throws -> InspectionEvidence {
+func inspectNativeDocument(_ input: Data, format: String, budget: inout InspectionBudget) throws
+  -> InspectionEvidence
+{
   let started = ContinuousClock.now
   defer { budget.remainingTime -= started.duration(to: .now) }
   guard budget.remainingTime > .zero else { throw InspectionCode.taskLimit }
@@ -20,6 +22,7 @@ func inspectNativePDF(_ input: Data, budget: inout InspectionBudget) throws -> I
         .deletingLastPathComponent().deletingLastPathComponent()
         .deletingLastPathComponent().deletingLastPathComponent()
         .appendingPathComponent("TidyInspectionHelper")
+      process.arguments = ["--format=\(format)"]
       do {
         output = try WorkerSupervisor.run(input, process: process, deadline: deadline) {
           withUnsafeCurrentTask { $0?.isCancelled == true }
@@ -29,21 +32,31 @@ func inspectNativePDF(_ input: Data, budget: inout InspectionBudget) throws -> I
         throw InspectionCode(rawValue: failure.rawValue) ?? .unreadable
       }
     } else {
-      output = try inspectPDFService(input, deadline: deadline)
+      output = try inspectDocumentService(input, format: format, deadline: deadline)
     }
   #else
-    output = try inspectPDFService(input, deadline: deadline)
+    output = try inspectDocumentService(input, format: format, deadline: deadline)
   #endif
   guard output.count <= 100_000,
     let reply = try? JSONDecoder().decode(InspectionReply.self, from: output)
   else { throw InspectionCode.unreadable }
   guard reply.code == "ok" else { throw InspectionCode(rawValue: reply.code) ?? .unreadable }
   guard reply.text.utf8.count <= 16_384,
-    ["wholeDocument", "first3PagesOnly"].contains(reply.coverage)
+    (format == "pdf" ? ["wholeDocument", "first3PagesOnly"] : ["wholeImage"]).contains(
+      reply.coverage)
   else { throw InspectionCode.inputLimit }
+  guard reply.text.filter(\.isLetter).count >= 8,
+    !reply.text.unicodeScalars.contains(where: {
+      CharacterSet.controlCharacters.contains($0)
+        && !CharacterSet.whitespacesAndNewlines.contains($0)
+    })
+  else { throw InspectionCode.unreadable }
   try Task.checkCancellation()
   guard ContinuousClock.now < deadline else { throw InspectionCode.deadline }
-  return InspectionEvidence(kind: "pdfText", text: reply.text, coverage: reply.coverage)
+  guard let kind = reply.kind,
+    (format == "pdf" ? ["pdfText", "pdfTextAndOCR"] : ["imageOCR"]).contains(kind)
+  else { throw InspectionCode.unreadable }
+  return InspectionEvidence(kind: kind, text: reply.text, coverage: reply.coverage)
 }
 
 // XPC callbacks arrive on Foundation's delivery queue, not on the task blocked in this short poll.
@@ -90,7 +103,9 @@ private final class ServiceResponse: @unchecked Sendable {
   }
 }
 
-private func inspectPDFService(_ input: Data, deadline: ContinuousClock.Instant) throws -> Data {
+private func inspectDocumentService(
+  _ input: Data, format: String, deadline: ContinuousClock.Instant
+) throws -> Data {
   guard input.count <= 20 * 1024 * 1024 else { throw InspectionCode.inputLimit }
   let connection = NSXPCConnection(serviceName: inspectionServiceName)
   let response = ServiceResponse()
@@ -104,7 +119,7 @@ private func inspectPDFService(_ input: Data, deadline: ContinuousClock.Instant)
       as? InspectionServiceProtocol
   else { throw InspectionCode.unavailable }
   let id = UUID().uuidString
-  service.inspectPDF(input, requestID: id) { response.finish($0) }
+  service.inspectDocument(input, format: format, requestID: id) { response.finish($0) }
   do {
     while true {
       try Task.checkCancellation()

@@ -20,6 +20,12 @@ case "crash":
   _exit(23)
 case "oversize":
   try? FileHandle.standardOutput.write(contentsOf: Data(repeating: 65, count: 200_000))
+case "malformed":
+  try? FileHandle.standardOutput.write(contentsOf: Data("{}".utf8))
+case "badText":
+  try? FileHandle.standardOutput.write(
+    contentsOf: Data(
+      #"{"code":"ok","text":"Acme Invoice\u0000","coverage":"wholeDocument"}"#.utf8))
 case "containment":
   let source = open("/etc/passwd", O_RDONLY)
   let readDenied = source < 0 && errno == EPERM
@@ -51,7 +57,7 @@ case "containment":
   try? FileHandle.standardOutput.write(
     contentsOf: Data(
       """
-      {"code":"\(code)","text":"Acme Invoice AB123 2026-10-28","coverage":"wholeDocument"}
+      {"code":"\(code)","text":"Acme Invoice AB123 2026-10-28","coverage":"wholeDocument","kind":"pdfText"}
       """.utf8))
 default:
   try? FileHandle.standardOutput.write(contentsOf: Data("ok".utf8))

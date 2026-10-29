@@ -39,7 +39,8 @@ struct InspectionBudget {
 func inspectContents(
   _ item: InventoryItem, root: ScopedDirectory, budget: inout InspectionBudget
 ) throws -> InspectionEvidence {
-  if URL(fileURLWithPath: item.name).pathExtension.lowercased() == "pdf" {
+  let format = URL(fileURLWithPath: item.name).pathExtension.lowercased()
+  if ["pdf", "png", "jpg", "jpeg", "heic", "heif", "tif", "tiff"].contains(format) {
     // Preserve the text aggregate allowance separately from compressed native-document inputs.
     var nativeBudget = InspectionBudget()
     nativeBudget.remainingBytes = budget.remainingPDFBytes
@@ -50,14 +51,14 @@ func inspectContents(
     }
     let data = try readInspectionInput(
       item, root: root, budget: &nativeBudget, maximumBytes: 20 * 1024 * 1024)
-    let evidence = try inspectNativePDF(data, budget: &nativeBudget)
+    let evidence = try inspectNativeDocument(data, format: format, budget: &nativeBudget)
     guard evidence.text.utf8.count <= budget.remainingEvidenceBytes else {
       throw InspectionCode.taskLimit
     }
     budget.remainingEvidenceBytes -= evidence.text.utf8.count
     return evidence
   }
-  guard ["txt", "md"].contains(URL(fileURLWithPath: item.name).pathExtension.lowercased()) else {
+  guard ["txt", "md"].contains(format) else {
     throw InspectionCode.unsupported
   }
   var data = try readInspectionInput(
