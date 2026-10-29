@@ -30,6 +30,7 @@ func strictNamingJSON(_ text: String) -> Bool {
     files.allSatisfy({
       (Set($0.keys) == ["sourceID", "title", "name", "disposition"] && $0["name"] is String)
         || Set($0.keys) == ["sourceID", "title", "disposition"]
+        || Set($0.keys) == ["sourceID", "headingIndex", "disposition"]
     })
   else { return false }
   return uniqueJSONKeys(data)

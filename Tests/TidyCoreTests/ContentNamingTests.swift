@@ -3,6 +3,39 @@ import Testing
 import TidyCore
 
 struct ContentNamingTests {
+  @Test func headingSelectionIsBoundedAndExpandedWithoutRetypingEvidence() async throws {
+    let fixture = try LanguageFixture()
+    defer { fixture.remove() }
+    let bytes = Data(
+      "Juniper Warranty JW075 2026-11-09\nThis warranty covers the repaired garden equipment and its scheduled maintenance."
+        .utf8)
+    try bytes.write(to: fixture.folder.appendingPathComponent("scan.txt"))
+    let coordinator = TaskCoordinator(bookmarkFile: fixture.bookmark)
+    _ = try await coordinator.selectFolderForWriting(fixture.folder)
+    let request = "Give files readable names from contents"
+    let intent = try metadataResponse(
+      request: request, sort: "none",
+      rename: [["kind": "content", "evidence": request, "value": "", "from": ""]])
+    let sequence = ResponseSequence([
+      intent,
+      #"{"files":[{"sourceID":"f0","headingIndex":99,"disposition":"apply"}]}"#,
+      #"{"files":[{"sourceID":"f0","headingIndex":0,"disposition":"apply"}]}"#,
+    ])
+    let outcome = try await coordinator.planTask(request: request) { _, _, _ in
+      await sequence.next()
+    }
+    guard case .plan(let plan) = outcome else {
+      Issue.record("Expected indexed heading")
+      return
+    }
+    #expect(plan.changes.first?.destinationName == "Juniper Warranty JW075 2026-11-09.txt")
+    #expect(await sequence.count == 3)
+    #expect(try await coordinator.undoHistory().isEmpty)
+    #expect(try await coordinator.execute(plan).changed.count == 1)
+    try await TaskCoordinator(bookmarkFile: fixture.bookmark).undoTask(plan.id)
+    #expect(try Data(contentsOf: fixture.folder.appendingPathComponent("scan.txt")) == bytes)
+  }
+
   @Test func titleAssemblyAbstainsWhenRequestedTranslationHasNoGroundedVocabulary() async throws {
     let fixture = try LanguageFixture()
     defer { fixture.remove() }
