@@ -3,6 +3,61 @@ import Testing
 import TidyCore
 
 struct ContentNamingTests {
+  @Test func titleAssemblyRetainsUnicodeNumericIdentifiersAndDates() async throws {
+    let fixture = try LanguageFixture()
+    defer { fixture.remove() }
+    try Data(
+      "Juniper Warranty\nThis warranty covers repairs under reference JW٠٧٥ and section Ⅳ dated 2026-11-09."
+        .utf8
+    )
+    .write(to: fixture.folder.appendingPathComponent("scan.txt"))
+    let coordinator = TaskCoordinator(bookmarkFile: fixture.bookmark)
+    _ = try await coordinator.selectFolderForWriting(fixture.folder)
+    let request = "Give files readable names from contents"
+    let intent = try metadataResponse(
+      request: request, sort: "none",
+      rename: [["kind": "content", "evidence": request, "value": "", "from": ""]])
+    let sequence = ResponseSequence([
+      intent,
+      #"{"files":[{"sourceID":"f0","headingIndex":0,"disposition":"apply"}]}"#,
+    ])
+    let outcome = try await coordinator.planTask(request: request) { _, _, _ in
+      await sequence.next()
+    }
+    guard case .plan(let plan) = outcome else {
+      Issue.record("Expected literal preservation")
+      return
+    }
+    #expect(plan.changes.first?.destinationName == "Juniper Warranty JW٠٧٥ Ⅳ 2026-11-09.txt")
+    #expect(try await coordinator.undoHistory().isEmpty)
+  }
+
+  @Test func writtenNumeralInsideJapanesePlaceNameDoesNotBecomeAnIdentifier() async throws {
+    let fixture = try LanguageFixture()
+    defer { fixture.remove() }
+    try Data("京都 会議 計画\n京都の会議について、参加者と会場を確認してください。".utf8)
+      .write(to: fixture.folder.appendingPathComponent("scan.txt"))
+    let coordinator = TaskCoordinator(bookmarkFile: fixture.bookmark)
+    _ = try await coordinator.selectFolderForWriting(fixture.folder)
+    let request = "Give files readable names from contents"
+    let intent = try metadataResponse(
+      request: request, sort: "none",
+      rename: [["kind": "content", "evidence": request, "value": "", "from": ""]])
+    let sequence = ResponseSequence([
+      intent,
+      #"{"files":[{"sourceID":"f0","headingIndex":0,"disposition":"apply"}]}"#,
+    ])
+    let outcome = try await coordinator.planTask(request: request) { _, _, _ in
+      await sequence.next()
+    }
+    guard case .plan(let plan) = outcome else {
+      Issue.record("Expected source-language heading")
+      return
+    }
+    #expect(plan.changes.first?.destinationName == "京都 会議 計画.txt")
+    #expect(try await coordinator.undoHistory().isEmpty)
+  }
+
   @Test func headingSelectionIsBoundedAndExpandedWithoutRetypingEvidence() async throws {
     let fixture = try LanguageFixture()
     defer { fixture.remove() }

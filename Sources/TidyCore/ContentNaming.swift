@@ -96,7 +96,7 @@ extension TaskCoordinator {
         ?? reliableLanguage(request, minimumLetters: 12, minimumWords: 3) ?? "und"
       let requiredTokens =
         protectedOriginalTokens(item.name)
-        + contentTokens(evidence.text).filter { $0.contains(where: \.isNumber) }
+        + contentTokens(evidence.text).filter(containsNamingNumber)
         + protectedTitleNames(String(evidence.text.split(separator: "\n").first ?? ""))
       let extensionSuffix = "." + URL(fileURLWithPath: item.name).pathExtension
       let input = NamingInput(
@@ -267,7 +267,7 @@ private func validatedContentName(_ raw: String, input: NamingInput) -> Result<
     preservesContentTokens(protectedOriginalTokens(input.originalName), in: stem),
     preservesContentTokens(input.requiredTokens, in: stem),
     preservesContentTokens(
-      contentTokens(input.untrustedEvidence).filter({ $0.contains(where: \.isNumber) }), in: stem),
+      contentTokens(input.untrustedEvidence).filter(containsNamingNumber), in: stem),
     preservesContentTokens(protectedTitleNames(title), in: stem),
     descriptorLanguageMatches(stem, original: input.originalName, language: input.outputLanguage),
     languageMatches(stem, expected: input.outputLanguage)
@@ -338,7 +338,7 @@ private func reliableLanguage(
   // Language scores alone can be confident on a short identifier soup. Require enough prose
   // before allowing a source-language guess to override the user's request language.
   guard text.filter(\.isLetter).count >= minimumLetters,
-    contentWords(text).filter({ $0.count >= 3 && !$0.contains(where: \.isNumber) }).count
+    contentWords(text).filter({ $0.count >= 3 && !containsNamingNumber($0) }).count
       >= minimumWords
   else { return nil }
   let recognizer = NLLanguageRecognizer()
@@ -348,6 +348,17 @@ private func reliableLanguage(
     first.value - (hypotheses.dropFirst().first?.value ?? 0) >= 0.2
   else { return nil }
   return first.key.rawValue
+}
+
+private func containsNamingNumber(_ text: String) -> Bool {
+  // Character.isNumber also marks written numeric words such as 京 in 京都 as numbers. Preserve
+  // Unicode number-category literals (including non-ASCII digits), not entire prose containing 京.
+  text.unicodeScalars.contains {
+    switch $0.properties.generalCategory {
+    case .decimalNumber, .letterNumber, .otherNumber: true
+    default: false
+    }
+  }
 }
 
 private func languageMatches(_ text: String, expected: String) -> Bool {

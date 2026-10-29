@@ -335,18 +335,30 @@ struct ModelSmoke {
           "Synthetic-long-metadata-document-2026-10-28-ID\(index).txt"))
     }
     _ = try await coordinator.selectFolderForWriting(grantedFolder)
+    let large = try await coordinator.planTask(request: "Sort by type") { system, user, limit in
+      try await runtime.completeJSON(system: system, user: user, maximumOutputTokens: limit)
+    }
+    guard case .plan(let largePlan) = large, largePlan.changedCount == 302,
+      largePlan.abstained.count == 1, largePlan.requiresConfirmation
+    else { throw LocalInferenceError.smokeCheckFailed }
     do {
-      _ = try await coordinator.planTask(request: "Sort by type") { system, user, limit in
-        try await runtime.completeJSON(system: system, user: user, maximumOutputTokens: limit)
-      }
+      _ = try await coordinator.execute(largePlan)
       throw LocalInferenceError.smokeCheckFailed
-    } catch LocalInferenceError.contextLimit {
+    } catch SortError.confirmationRequired {
       guard try await coordinator.undoHistory().allSatisfy({ $0.state == .undone }),
         try FileManager.default.contentsOfDirectory(atPath: folder.path).count == 303
       else { throw LocalInferenceError.smokeCheckFailed }
       print(
-        "Oversized real metadata plan rejected at native context bound; no partial plan or mutations"
+        "Real-model complete 303-file plan: 302 changes, one abstention; confirmation blocked all mutation"
       )
+    }
+    do {
+      _ = try await runtime.completeJSON(
+        system: "Return only JSON.", user: String(repeating: "oversized ", count: 8192),
+        maximumOutputTokens: 64)
+      throw LocalInferenceError.smokeCheckFailed
+    } catch LocalInferenceError.contextLimit {
+      print("Native oversized input still rejected at unchanged context bound; no prefix accepted")
     }
   }
 
