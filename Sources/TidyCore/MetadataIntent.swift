@@ -11,6 +11,14 @@ enum IntentViolation: String, Error {
     "If sorting or moving was NOT requested, sort.kind MUST be none, with evidence/value empty. Do not copy type from the example into a rename-only task. Otherwise use a documented sort kind with exact request evidence for the sorting action and type, date source/precision, or quoted folder literal."
   case rename =
     "Use only documented rename rules with exact positive user-request evidence and literal parameters. Respect restrictions against renaming."
+  case renameEvidence =
+    "A rename rule's evidence must be copied from a clause whose effect includes rename. Copy the complete positive action clause verbatim, not a paraphrase or a fragment from another clause. Preserve quoted literals exactly."
+  case renameSeparator =
+    "A separator rule needs the requested replacement verb and BOTH source/target separators in its evidence. from/value are literal space, underscore or hyphen characters, not words."
+  case renameCase =
+    "A case rule needs the explicit requested lowercase/uppercase/title-case phrase in its evidence, with value and from both empty."
+  case renameLiteral =
+    "A prefix/suffix rule needs its action word AND the exact quoted literal in its evidence. Copy the user's literal including case and whitespace; from must be empty."
   case selection =
     "Selection evidence must quote an explicitly requested extension or exact quoted name substring, never a generic word like files. If extensions and nameContains are both empty, evidence MUST also be empty: {\"extensions\":[],\"nameContains\":\"\",\"evidence\":\"\"}, and REMOVE selection from clause effects (use rename, not rename+selection, for content naming without a filter). Do not infer a filter from inventory. A clause declaring a filter must include the selection effect."
   case clauses =
@@ -167,7 +175,7 @@ struct MetadataIntent: Decodable {
       else { throw IntentViolation.rename }
     }
     for rule in rename {
-      guard evidence(rule.evidence, effect: "rename") else { throw IntentViolation.rename }
+      guard evidence(rule.evidence, effect: "rename") else { throw IntentViolation.renameEvidence }
       let words = metadataInstructionText(rule.evidence)
       switch rule.kind {
       case "content":
@@ -188,7 +196,7 @@ struct MetadataIntent: Decodable {
             ]),
           separatorMention(rule.from, in: rule.evidence.lowercased()),
           separatorMention(rule.value, in: rule.evidence.lowercased())
-        else { throw IntentViolation.rename }
+        else { throw IntentViolation.renameSeparator }
       case "lowercase", "uppercase", "titlecase":
         let terms =
           rule.kind == "lowercase"
@@ -197,7 +205,7 @@ struct MetadataIntent: Decodable {
             ? ["uppercase", "upper case", "upper-case", "all caps"]
             : ["title case", "titlecase", "title-case", "capitalize"]
         guard rule.value.isEmpty, rule.from.isEmpty, terms.contains(where: words.contains) else {
-          throw IntentViolation.rename
+          throw IntentViolation.renameCase
         }
       case "prefix", "suffix":
         guard rule.from.isEmpty, !rule.value.isEmpty, rule.value.utf8.count <= 80,
@@ -206,7 +214,7 @@ struct MetadataIntent: Decodable {
           (rule.kind == "prefix"
             ? ["prefix", "prepend", "start", "begin"] : ["suffix", "append", "end"]).contains(
               where: words.contains)
-        else { throw IntentViolation.rename }
+        else { throw IntentViolation.renameLiteral }
       case "filenameDatePrefix", "modifiedDatePrefix":
         guard rule.value.isEmpty, rule.from.isEmpty, words.contains("date"),
           ["prefix", "prepend", "start", "begin"].contains(where: words.contains),

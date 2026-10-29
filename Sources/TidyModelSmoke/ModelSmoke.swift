@@ -37,6 +37,11 @@ struct ModelSmoke {
     print("Native verified load + readiness check seconds: \(started.duration(to: .now))")
     reportMemory("loaded")
     await reportMetrics(runtime)
+    if CommandLine.arguments.contains("--metadata-evidence-only") {
+      try await taskCoordinationSmoke(runtime)
+      await runtime.unload()
+      return
+    }
     if CommandLine.arguments.contains("--qualify-performance-only")
       || CommandLine.arguments.contains("--qualify-v1")
     {
