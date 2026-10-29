@@ -8,6 +8,12 @@ import TidyModelRuntime
 @main
 struct ModelSmoke {
   @MainActor static func main() async throws {
+    if CommandLine.arguments.contains("--inspection-only") {
+      let index = CommandLine.arguments.firstIndex(of: "--worker-case")
+      let workerCase = index.map { CommandLine.arguments[$0 + 1] }
+      try await controlledPDFSmoke(workerCase: workerCase)
+      return
+    }
     let runtime = MLXLocalModelRuntime()
     let root = URL.applicationSupportDirectory.appendingPathComponent(
       "Tidy/QualificationModels", isDirectory: true)
@@ -27,6 +33,16 @@ struct ModelSmoke {
     print("Native verified load + readiness check seconds: \(started.duration(to: .now))")
     reportMemory("loaded")
     await reportMetrics(runtime)
+    if CommandLine.arguments.contains("--pdf-evidence-only") {
+      try await pdfNamingSmoke(runtime)
+      await runtime.unload()
+      return
+    }
+    if CommandLine.arguments.contains("--text-evidence-only") {
+      try await contentNamingSmoke(runtime)
+      await runtime.unload()
+      return
+    }
     // Reuse the approved local qualification artifact, never download another copy.
     // A native activation/selection failure must leave the original runtime usable.
     do {
@@ -69,9 +85,7 @@ struct ModelSmoke {
     )
     reportMemory("after generation")
     await reportMetrics(runtime)
-    if CommandLine.arguments.contains("--pdf-evidence") {
-      try await pdfNamingSmoke(runtime)
-    }
+    try await pdfNamingSmoke(runtime)
     try await contentNamingSmoke(runtime)
     try await taskCoordinationSmoke(runtime)
     try await recursiveTaskSmoke(runtime)

@@ -12,7 +12,7 @@ enum IntentViolation: String, Error {
   case rename =
     "Use only documented rename rules with exact positive user-request evidence and literal parameters. Respect restrictions against renaming."
   case selection =
-    "Selection evidence must quote the user's requested extensions or exact quoted name substring."
+    "Selection evidence must quote an explicitly requested extension or exact quoted name substring, never a generic word like files. If extensions and nameContains are both empty, evidence MUST also be empty: {\"extensions\":[],\"nameContains\":\"\",\"evidence\":\"\"}, and REMOVE selection from clause effects (use rename, not rename+selection, for content naming without a filter). Do not infer a filter from inventory. A clause declaring a filter must include the selection effect."
   case clauses =
     "Each clause must correspond to an actual declared rule or a preservation constraint; do not hide unsupported actions."
 }

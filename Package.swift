@@ -18,8 +18,11 @@ let package = Package(
     .package(url: "https://github.com/huggingface/swift-transformers", exact: "1.3.5"),
   ],
   targets: [
-    .target(name: "TidyCore"),
+    .target(name: "TidyCore", dependencies: ["TidyInspection"]),
+    .target(name: "TidyInspection"),
     .executableTarget(name: "TidyInspectionHelper"),
+    .executableTarget(name: "TidyInspectionService", dependencies: ["TidyInspection"]),
+    .executableTarget(name: "TidyInspectionTestWorker", path: "Tests/InspectionTestWorker"),
     .target(name: "TidyModel"),
     .target(
       name: "TidyModelRuntime",
@@ -39,6 +42,7 @@ let package = Package(
         .product(name: "MLX", package: "mlx-swift"),
       ]),
     .testTarget(name: "TidyCoreTests", dependencies: ["TidyCore"]),
+    .testTarget(name: "TidyInspectionTests", dependencies: ["TidyInspection"]),
     .testTarget(name: "TidyModelTests", dependencies: ["TidyModel"]),
   ]
 )

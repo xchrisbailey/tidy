@@ -212,7 +212,10 @@ extension TaskCoordinator {
     Case rules and date-prefix rules have empty value/from. Date-prefix evidence must specify filename/name or modification date source. \
     Other precise naming rules that cannot preserve known information need clarification or refusal; never substitute a different rule silently. \
     Selection supports exact extensions and/or a quoted nameContains literal. Each extension must be mentioned in selection evidence, e.g. PDFs -> pdf. \
-    No selection means empty extensions, nameContains, evidence. Sort none has empty evidence/value; nonliteral sorts have empty value. \
+    A clause that both selects PDFs and requests content naming has effect rename+selection, not just rename. Example for 'Give PDFs readable names based on their contents' with one file: \
+    {"status":"plan","message":"","clauses":[{"text":"Give PDFs readable names based on their contents","effect":"rename+selection"}],"sort":{"kind":"none","evidence":"","value":""},"rename":[{"kind":"content","evidence":"Give PDFs readable names based on their contents","value":"","from":""}],"selection":{"extensions":["pdf"],"nameContains":"","evidence":"PDFs"},"files":[{"sourceID":"f0","disposition":"apply"}]} \
+    No selection means empty extensions, nameContains, evidence AND no selection effect in clauses. Generic 'files' is not a filter: content naming for all files uses rename, NOT rename+selection. Sort none has empty evidence/value; nonliteral sorts have empty value. \
+    Never infer an extension selection from the inventory. A request about 'files' has empty selection even if every supplied file is a PDF; selection evidence must explicitly request the restriction. \
     Clause text strings IN ORDER must concatenate to the EXACT entire original request, including spaces and punctuation. \
     Prefer ONE clause containing the complete original request; combine its effects when needed. This avoids lost spaces or paraphrasing. \
     Each clause effect is sort, rename, selection, constraint, unsupported or ambiguous. A single clause can combine supported effects with +, e.g. sort+selection or sort+rename+selection. Every rule's evidence is an exact nonempty substring of its corresponding clause, copied from the USER REQUEST, not metadata. \

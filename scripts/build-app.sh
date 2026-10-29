@@ -7,8 +7,7 @@ bin_path="$(swift build --configuration debug --arch arm64 --show-bin-path)"
 app="$PWD/.build/Tidy.app"
 mkdir -p "$app/Contents/MacOS"
 cp "$bin_path/Tidy" "$app/Contents/MacOS/Tidy"
-cp "$bin_path/TidyInspectionHelper" "$app/Contents/MacOS/TidyInspectionHelper"
-codesign --force --sign - --entitlements Packaging/InspectionHelper.entitlements "$app/Contents/MacOS/TidyInspectionHelper"
+bash scripts/package-inspection.sh "$bin_path" "$app"
 mkdir -p "$app/Contents/Resources"
 # MLX's compiled Metal library lives in a SwiftPM resource bundle, not in the executable.
 while IFS= read -r -d '' bundle; do
@@ -21,6 +20,5 @@ if ! find "$app/Contents/Resources" -name '*.metallib' -print -quit | grep -q .;
 fi
 cp Packaging/Info.plist "$app/Contents/Info.plist"
 codesign --force --sign - --entitlements Packaging/Tidy.entitlements "$app"
-codesign --verify --strict "$app"
-codesign --verify --strict "$app/Contents/MacOS/TidyInspectionHelper"
+codesign --verify --deep --strict "$app"
 echo "Built sandboxed arm64 app: $app"

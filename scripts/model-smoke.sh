@@ -4,14 +4,12 @@ cd "$(dirname "$0")/.."
 
 swift build --product TidyModelSmoke
 swift build --product TidyInspectionHelper
+swift build --product TidyInspectionService
 bin_path="$(swift build --show-bin-path)"
 app="$PWD/.build/TidyModelSmoke.app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 cp "$bin_path/TidyModelSmoke" "$app/Contents/MacOS/TidyModelSmoke"
-cp "$bin_path/TidyInspectionHelper" "$app/Contents/MacOS/TidyInspectionHelper"
-# This diagnostic parent is not App Sandbox enabled. The helper still installs its own restrictive
-# profile; production packaging uses App Sandbox inheritance in addition to that profile.
-codesign --force --sign - "$app/Contents/MacOS/TidyInspectionHelper"
+bash scripts/package-inspection.sh "$bin_path" "$app"
 cp Packaging/Info.plist "$app/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c 'Set :CFBundleExecutable TidyModelSmoke' "$app/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c 'Set :CFBundleIdentifier dev.tidy.model-smoke' "$app/Contents/Info.plist"
@@ -28,4 +26,4 @@ if [[ "${1:-}" == "--download-approved" ]]; then
 fi
 # Prove packaged resource discovery without network or the build-machine Metal fallback.
 exec sandbox-exec -p "(version 1) (allow default) (deny network*) (deny file-read* (subpath \"$bin_path\"))" \
-  "$app/Contents/MacOS/TidyModelSmoke"
+  "$app/Contents/MacOS/TidyModelSmoke" "$@"

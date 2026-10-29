@@ -1,110 +1,41 @@
 import Darwin
 import Foundation
+import TidyInspection
 
-// One child per inspection, serially awaited by the existing content stage. Only authorized capped
-// bytes cross this socket; the helper never receives source paths or filesystem operation authority.
 func inspectNativePDF(_ input: Data, budget: inout InspectionBudget) throws -> InspectionEvidence {
   let started = ContinuousClock.now
   defer { budget.remainingTime -= started.duration(to: .now) }
   guard budget.remainingTime > .zero else { throw InspectionCode.taskLimit }
   let deadline = started.advanced(by: min(.seconds(3), budget.remainingTime))
-  let process = Process()
-  var executable = URL(fileURLWithPath: ProcessInfo.processInfo.arguments[0])
-    .deletingLastPathComponent().appendingPathComponent("TidyInspectionHelper")
+  let output: Data
   #if DEBUG
+    // SwiftPM's command-line runner has no application/XPC bundle. Only that runner uses the
+    // same broker supervisor directly; packaged apps never fall back to an in-process parser.
     let arguments = ProcessInfo.processInfo.arguments
     if URL(fileURLWithPath: arguments[0]).lastPathComponent == "swiftpm-testing-helper",
       let index = arguments.firstIndex(of: "--test-bundle-path"), index + 1 < arguments.count
     {
-      executable = URL(fileURLWithPath: arguments[index + 1])
+      let process = Process()
+      process.executableURL = URL(fileURLWithPath: arguments[index + 1])
         .deletingLastPathComponent().deletingLastPathComponent()
         .deletingLastPathComponent().deletingLastPathComponent()
         .appendingPathComponent("TidyInspectionHelper")
+      do {
+        output = try WorkerSupervisor.run(input, process: process, deadline: deadline) {
+          withUnsafeCurrentTask { $0?.isCancelled == true }
+        }
+      } catch let failure as WorkerFailure {
+        if failure == .cancelled { throw CancellationError() }
+        throw InspectionCode(rawValue: failure.rawValue) ?? .unreadable
+      }
+    } else {
+      output = try inspectPDFService(input, deadline: deadline)
     }
+  #else
+    output = try inspectPDFService(input, deadline: deadline)
   #endif
-  guard FileManager.default.isExecutableFile(atPath: executable.path) else {
-    throw InspectionCode.unavailable
-  }
-  var sockets: [Int32] = [-1, -1]
-  guard socketpair(AF_UNIX, SOCK_STREAM, 0, &sockets) == 0 else {
-    throw InspectionCode.unavailable
-  }
-  let parent = sockets[0]
-  let child = FileHandle(fileDescriptor: sockets[1], closeOnDealloc: true)
-  defer {
-    close(parent)
-    try? child.close()
-  }
-  var enabled: Int32 = 1
-  guard
-    setsockopt(parent, SOL_SOCKET, SO_NOSIGPIPE, &enabled, socklen_t(MemoryLayout<Int32>.size))
-      == 0,
-    fcntl(parent, F_SETFL, O_NONBLOCK) == 0,
-    fcntl(parent, F_SETFD, FD_CLOEXEC) == 0,
-    fcntl(sockets[1], F_SETFD, FD_CLOEXEC) == 0
-  else { throw InspectionCode.unavailable }
-  process.executableURL = executable
-  process.environment = ["PATH": "/usr/bin:/bin"]
-  process.standardInput = child
-  process.standardOutput = child
-  process.standardError = FileHandle.nullDevice
-  do { try process.run() } catch { throw InspectionCode.unavailable }
-  try? child.close()
-  defer {
-    // SIGKILL rather than an unbounded graceful wait: reap before returning, including cancellation,
-    // invalid IPC and timeouts. OS scheduling/reaping latency is not a hard wall-clock guarantee.
-    if process.isRunning { kill(process.processIdentifier, SIGKILL) }
-    process.waitUntilExit()
-  }
-  var sent = 0
-  var output = Data()
-  var buffer = [UInt8](repeating: 0, count: 4096)
-  var inputClosed = false
-  while true {
-    try Task.checkCancellation()
-    guard ContinuousClock.now < deadline else { throw InspectionCode.deadline }
-    if sent < input.count {
-      let count = input.withUnsafeBytes { bytes in
-        send(parent, bytes.baseAddress!.advanced(by: sent), min(4096, input.count - sent), 0)
-      }
-      if count > 0 {
-        sent += count
-      } else if count < 0 && errno == EPIPE {
-        // A fail-closed helper may reply before consuming all input (for example, containment
-        // initialization failed). Drain its bounded reply instead of losing the safe reason code.
-        inputClosed = true
-        sent = input.count
-      } else if count < 0 && errno != EAGAIN && errno != EINTR {
-        throw InspectionCode.unreadable
-      }
-    }
-    if sent == input.count && !inputClosed {
-      shutdown(parent, SHUT_WR)
-      inputClosed = true
-    }
-    let count = recv(parent, &buffer, buffer.count, 0)
-    if count > 0 {
-      guard output.count + count <= 100_000 else { throw InspectionCode.inputLimit }
-      output.append(contentsOf: buffer.prefix(count))
-    } else if count == 0 {
-      break
-    } else if errno != EAGAIN && errno != EINTR {
-      throw InspectionCode.unreadable
-    }
-    usleep(5_000)
-  }
-  while process.isRunning {
-    try Task.checkCancellation()
-    guard ContinuousClock.now < deadline else { throw InspectionCode.deadline }
-    usleep(5_000)
-  }
-  struct Reply: Decodable {
-    let code: String
-    let text: String
-    let coverage: String
-  }
-  guard process.terminationStatus == 0,
-    let reply = try? JSONDecoder().decode(Reply.self, from: output)
+  guard output.count <= 100_000,
+    let reply = try? JSONDecoder().decode(InspectionReply.self, from: output)
   else { throw InspectionCode.unreadable }
   guard reply.code == "ok" else { throw InspectionCode(rawValue: reply.code) ?? .unreadable }
   guard reply.text.utf8.count <= 16_384,
@@ -113,4 +44,81 @@ func inspectNativePDF(_ input: Data, budget: inout InspectionBudget) throws -> I
   try Task.checkCancellation()
   guard ContinuousClock.now < deadline else { throw InspectionCode.deadline }
   return InspectionEvidence(kind: "pdfText", text: reply.text, coverage: reply.coverage)
+}
+
+// XPC callbacks arrive on Foundation's delivery queue, not on the task blocked in this short poll.
+// The condition protects every callback result; no untrusted error descriptions are retained.
+private final class ServiceResponse: @unchecked Sendable {
+  let condition = NSCondition()
+  private var output: Data?
+  private var failed = false
+  private var acknowledged = false
+
+  func finish(_ value: Data) {
+    condition.lock()
+    defer { condition.unlock() }
+    if value.count <= 100_000 { output = value } else { failed = true }
+    condition.broadcast()
+  }
+  func fail() {
+    condition.lock()
+    failed = true
+    condition.broadcast()
+    condition.unlock()
+  }
+  func acknowledge() {
+    condition.lock()
+    acknowledged = true
+    condition.broadcast()
+    condition.unlock()
+  }
+  func result() throws -> Data? {
+    condition.lock()
+    defer { condition.unlock() }
+    if failed { throw InspectionCode.unavailable }
+    return output
+  }
+  func wait() {
+    condition.lock()
+    _ = condition.wait(until: Date(timeIntervalSinceNow: 0.005))
+    condition.unlock()
+  }
+  var cleaned: Bool {
+    condition.lock()
+    defer { condition.unlock() }
+    return acknowledged
+  }
+}
+
+private func inspectPDFService(_ input: Data, deadline: ContinuousClock.Instant) throws -> Data {
+  guard input.count <= 20 * 1024 * 1024 else { throw InspectionCode.inputLimit }
+  let connection = NSXPCConnection(serviceName: inspectionServiceName)
+  let response = ServiceResponse()
+  connection.remoteObjectInterface = NSXPCInterface(with: InspectionServiceProtocol.self)
+  connection.interruptionHandler = { response.fail() }
+  connection.invalidationHandler = { response.fail() }
+  connection.resume()
+  defer { connection.invalidate() }
+  guard
+    let service = connection.remoteObjectProxyWithErrorHandler({ _ in response.fail() })
+      as? InspectionServiceProtocol
+  else { throw InspectionCode.unavailable }
+  let id = UUID().uuidString
+  service.inspectPDF(input, requestID: id) { response.finish($0) }
+  do {
+    while true {
+      try Task.checkCancellation()
+      guard ContinuousClock.now < deadline else { throw InspectionCode.deadline }
+      if let result = try response.result() { return result }
+      response.wait()
+    }
+  } catch {
+    // Cancellation acknowledgement means the broker has synchronously reaped its child, not just
+    // invalidated a connection. If the broker itself dies, the worker's independent fail-stop is
+    // the last line of defense; allow it to quiesce before returning. No new worker is started here.
+    service.cancel(id) { response.acknowledge() }
+    let cleanupDeadline = ContinuousClock.now.advanced(by: .seconds(4))
+    while !response.cleaned && ContinuousClock.now < cleanupDeadline { response.wait() }
+    throw error
+  }
 }

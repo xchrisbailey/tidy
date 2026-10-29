@@ -30,7 +30,10 @@ func inspect() -> Reply {
     (allow file-read* (subpath "/System") (subpath "/usr/lib"))
     (allow file-read* (subpath "\(ownDirectory)"))
     """
-  guard profile.withCString({ restrictProcess($0, 0, nil) }) == 0 else {
+  guard
+    CommandLine.arguments.contains("--inherited-containment")
+      || profile.withCString({ restrictProcess($0, 0, nil) }) == 0
+  else {
     return Reply(code: "unavailable")
   }
   var input = Data()

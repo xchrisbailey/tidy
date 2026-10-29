@@ -5,7 +5,10 @@ import Testing
 import TidyCore
 
 struct PDFNamingTests {
-  @Test(arguments: ["collision", "cancel", "abstain", "injection"])
+  @Test(arguments: [
+    "collision", "cancel", "abstain", "injection", "inventedTitleDate", "wrongExtension",
+    "recoverTitle",
+  ])
   func pdfEvidenceRetainsExistingPlanRestrictions(kind: String) async throws {
     let fixture = try LanguageFixture()
     defer { fixture.remove() }
@@ -23,6 +26,7 @@ struct PDFNamingTests {
       request: request, sort: "none",
       rename: [["kind": "content", "evidence": request, "value": "", "from": ""]],
       decisions: kind == "collision" ? ["apply", "apply"] : ["apply"])
+    let namingResponses = ResponseSequence(["invalid", "valid"])
     let operation = Task {
       try await coordinator.planTask(request: request) { _, input, _ in
         let object =
@@ -32,10 +36,19 @@ struct PDFNamingTests {
         #expect(object?["outputLanguage"] as? String != "fr")
         let id = try #require(object?["sourceID"] as? String)
         if kind == "cancel" { withUnsafeCurrentTask { $0?.cancel() } }
-        let name =
+        var name =
           kind == "abstain"
           ? "" : kind == "injection" ? "../Outside.pdf" : "Acme Invoice AB123 2026-10-28.pdf"
-        let title = kind == "abstain" ? "" : "Acme Invoice AB123 2026-10-28"
+        if kind == "wrongExtension" { name = "Acme Invoice AB123 2026-10-28.txt" }
+        let recoveryResponse = await namingResponses.next()
+        let invalidTitle =
+          kind == "inventedTitleDate"
+          || (kind == "recoverTitle" && recoveryResponse == "invalid")
+        let title =
+          kind == "abstain"
+          ? ""
+          : invalidTitle
+            ? "Acme Invoice AB123 2026-01-28" : "Acme Invoice AB123 2026-10-28"
         let disposition = kind == "abstain" ? "abstain" : "apply"
         return """
           {"files":[{"sourceID":"\(id)","title":"\(title)","name":"\(name)","disposition":"\(disposition)"}]}
@@ -44,7 +57,7 @@ struct PDFNamingTests {
     }
     if kind == "cancel" {
       await #expect(throws: CancellationError.self) { try await operation.value }
-    } else if kind == "injection" {
+    } else if ["injection", "inventedTitleDate", "wrongExtension"].contains(kind) {
       await #expect(throws: PlanningError.invalidResponse) { try await operation.value }
     } else {
       guard case .plan(let plan) = try await operation.value else {
@@ -58,6 +71,9 @@ struct PDFNamingTests {
           Set(result.changed.map(\.destinationName)) == [
             "Acme Invoice AB123 2026-10-28.pdf", "Acme Invoice AB123 2026-10-28 (2).pdf",
           ])
+        try await TaskCoordinator(bookmarkFile: fixture.bookmark).undoTask(plan.id)
+      } else if kind == "recoverTitle" {
+        #expect(result.changed.count == 1)
         try await TaskCoordinator(bookmarkFile: fixture.bookmark).undoTask(plan.id)
       } else {
         #expect(result.changed.isEmpty)
@@ -137,16 +153,19 @@ struct PDFNamingTests {
     #expect(try Data(contentsOf: source) == bytes)
   }
 
-  @Test(arguments: [
-    "Acme Invoice AB123 2026-10-28", "Acme Report AB123 2026-10-28",
-    "Factura Iberia AB123 2026-10-28",
-  ])
-  func nativeInvoiceEvidenceRenamesWithoutChangingBytesAndSupportsReopenedUndo(title: String)
+  @Test(
+    arguments: [
+      "Acme Invoice AB123 2026-10-28", "Acme Report AB123 2026-10-28",
+      "Factura Iberia AB123 2026-10-28",
+    ], ["pdf", "PDF"])
+  func nativeInvoiceEvidenceRenamesWithoutChangingBytesAndSupportsReopenedUndo(
+    title: String, ext: String
+  )
     async throws
   {
     let fixture = try LanguageFixture()
     defer { fixture.remove() }
-    let source = fixture.folder.appendingPathComponent("scan.pdf")
+    let source = fixture.folder.appendingPathComponent("scan.\(ext)")
     let body =
       title.hasPrefix("Factura")
       ? "Esta factura corresponde a los servicios prestados durante octubre.\nEl pago se realizará mediante transferencia bancaria.\nPrivateCanary"
@@ -163,7 +182,7 @@ struct PDFNamingTests {
       if input.contains("untrustedEvidence") {
         #expect(input.contains(title))
         return """
-          {"files":[{"sourceID":"f0","title":"\(title)","name":"\(title).pdf","disposition":"apply"}]}
+          {"files":[{"sourceID":"f0","title":"\(title)","name":"\(title).\(ext)","disposition":"apply"}]}
           """
       }
       return intent
@@ -174,7 +193,7 @@ struct PDFNamingTests {
     }
     #expect(plan.abstained.isEmpty)
     #expect(try await coordinator.execute(plan).changed.count == 1)
-    #expect(try Data(contentsOf: fixture.folder.appendingPathComponent("\(title).pdf")) == bytes)
+    #expect(try Data(contentsOf: fixture.folder.appendingPathComponent("\(title).\(ext)")) == bytes)
     try await TaskCoordinator(bookmarkFile: fixture.bookmark).undoTask(plan.id)
     #expect(try Data(contentsOf: source) == bytes)
     let settings = fixture.root.appendingPathComponent("settings")
