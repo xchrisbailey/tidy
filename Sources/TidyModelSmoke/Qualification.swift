@@ -22,6 +22,30 @@ struct QualificationFixture: Decodable {
 }
 
 extension ModelSmoke {
+  static func qualificationErrorCode(_ error: Error) -> String {
+    switch error {
+    case LocalInferenceError.contextLimit: "contextLimit"
+    case LocalInferenceError.outputLimit: "outputLimit"
+    case PlanningError.invalidResponse: "invalidResponse"
+    case PlanningError.requestTooLarge: "requestTooLarge"
+    case is CancellationError: "cancelled"
+    default: "other"
+    }
+  }
+
+  static func qualificationPerformance(
+    _ runtime: MLXLocalModelRuntime, loadingTime: Duration
+  ) async throws {
+    try requireOfflineNetworkDenial()
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+      "tidy-qualification-performance-\(UUID())")
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let passed = try await qualificationBatch(
+      runtime, root: root, fixtures: [], loadingTime: loadingTime)
+    guard passed else { throw LocalInferenceError.smokeCheckFailed }
+  }
+
   static func qualificationCoordinator(_ folder: URL, bookmark: URL) async throws -> TaskCoordinator
   {
     let data = try folder.bookmarkData(
@@ -38,7 +62,9 @@ extension ModelSmoke {
 
   static func qualification(_ runtime: MLXLocalModelRuntime, loadingTime: Duration) async throws {
     try requireOfflineNetworkDenial()
-    let corpusURL = Bundle.module.url(forResource: "QualificationCorpus", withExtension: "json")!
+    guard
+      let corpusURL = Bundle.module.url(forResource: "QualificationCorpus", withExtension: "json")
+    else { throw LocalInferenceError.smokeCheckFailed }
     let fixtures = try JSONDecoder().decode(
       [QualificationFixture].self, from: Data(contentsOf: corpusURL))
     guard fixtures.count == 32, fixtures.filter(\.eligible).count == 24 else {
@@ -62,7 +88,8 @@ extension ModelSmoke {
       print("QUAL heartbeat ticks=\(ticks) maximumMainActorGap=\(maximum); not native UI evidence")
     }
     defer { heartbeat.cancel() }
-    try await qualificationBatch(runtime, root: root, fixtures: [], loadingTime: loadingTime)
+    let metadataPassed = try await qualificationBatch(
+      runtime, root: root, fixtures: [], loadingTime: loadingTime)
     var proposed = 0
     var usable = 0
     var useful = 0
@@ -134,7 +161,9 @@ extension ModelSmoke {
         )
       } catch {
         errors += 1
-        print("QUAL \(fixture.id) errorType=\(type(of: error)) seconds=\(start.duration(to: .now))")
+        print(
+          "QUAL \(fixture.id) errorCode=\(qualificationErrorCode(error)) seconds=\(start.duration(to: .now))"
+        )
         // Do not log arbitrary runtime errors or replace a failed cohort member with another fixture.
       }
       reportMemory("QUAL \(fixture.id)")
@@ -142,7 +171,7 @@ extension ModelSmoke {
     print(
       "QUAL SUMMARY proposed=\(proposed) descriptorUsable=\(usable) crypticUseful=\(useful)/24 abstained=\(abstained) unchanged=\(unchanged) skipped=\(skipped) errors=\(errors); agent semantic review required"
     )
-    try await qualificationBatch(
+    let contentHeavySucceeded = try await qualificationBatch(
       runtime, root: root, fixtures: Array(fixtures.filter(\.eligible).prefix(12)),
       loadingTime: .zero)
     let operation = Task {
@@ -153,21 +182,33 @@ extension ModelSmoke {
     try await Task.sleep(for: .milliseconds(100))
     let cancellationStart = ContinuousClock.now
     operation.cancel()
+    var cancellationSucceeded = false
     do {
       _ = try await operation.value
       print("QUAL cancellation FAILED: generation completed before cancellation")
     } catch is CancellationError {
+      cancellationSucceeded = true
       print("QUAL nativeCancellationDrained=\(cancellationStart.duration(to: .now))")
     }
     reportMemory("QUAL final")
     heartbeat.cancel()
     await heartbeat.value
+    let descriptorGate = proposed > 0 && Double(usable) / Double(proposed) >= 0.9
+    let crypticGate = Double(useful) / 24 >= 0.8
+    print(
+      "QUAL gates metadata100=\(metadataPassed) contentHeavyCompleted=\(contentHeavySucceeded) cancellation=\(cancellationSucceeded) noErrors=\(errors == 0) descriptorUpperBound90=\(descriptorGate) crypticUpperBound80=\(crypticGate); semantic/human gates remain separate"
+    )
+    guard metadataPassed, contentHeavySucceeded, cancellationSucceeded, errors == 0,
+      descriptorGate, crypticGate
+    else {
+      throw LocalInferenceError.smokeCheckFailed
+    }
   }
 
   static func qualificationBatch(
     _ runtime: MLXLocalModelRuntime, root: URL, fixtures: [QualificationFixture],
     loadingTime: Duration
-  ) async throws {
+  ) async throws -> Bool {
     let metadata = fixtures.isEmpty
     let label = metadata ? "metadata100" : "contentHeavy12"
     let work = root.appendingPathComponent(label)
@@ -212,15 +253,19 @@ extension ModelSmoke {
         }
       }
       print("QUAL \(label) bytesAndReopenedUndo=pass")
+      await reportMetrics(runtime)
+      reportMemory("QUAL \(label)")
+      return result.failed.isEmpty && result.unprocessed.isEmpty
+        && (!metadata || (result.changed.count == 100 && elapsed < .seconds(60)))
     } catch {
       let intact = originals.allSatisfy { name, bytes in
         (try? Data(contentsOf: folder.appendingPathComponent(name))) == bytes
       }
       print(
-        "QUAL \(label) FAILED errorType=\(type(of: error)) originalsIntact=\(intact) elapsedIncludingLoad=\(loadingTime + start.duration(to: .now))"
+        "QUAL \(label) FAILED errorCode=\(qualificationErrorCode(error)) originalsIntact=\(intact) elapsedIncludingLoad=\(loadingTime + start.duration(to: .now))"
       )
     }
-    await reportMetrics(runtime)
     reportMemory("QUAL \(label)")
+    return false
   }
 }

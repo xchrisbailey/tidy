@@ -66,7 +66,7 @@ embeddings, not photographs. The distribution is not a measured user-workload
 distribution. No handwriting, degraded real scans, scene photos, independently
 annotated OCR ground truth or broad language sample. These tests cannot establish
 real-user semantic accuracy, realistic parser peak memory or minimum hardware.
-Seven Latin/source-language cases and Japanese probe the current extractive policy;
+English, Spanish, French, German, Italian, Portuguese and Japanese probe the current extractive policy;
 they do not qualify general translation. Prior native rotation/format/bound tests
 remain part of deterministic coverage rather than being dropped.
 

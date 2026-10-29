@@ -37,8 +37,20 @@ struct ModelSmoke {
     print("Native verified load + readiness check seconds: \(started.duration(to: .now))")
     reportMemory("loaded")
     await reportMetrics(runtime)
-    if CommandLine.arguments.contains("--qualify-v1") {
-      try await qualification(runtime, loadingTime: started.duration(to: .now))
+    if CommandLine.arguments.contains("--qualify-performance-only")
+      || CommandLine.arguments.contains("--qualify-v1")
+    {
+      do {
+        if CommandLine.arguments.contains("--qualify-performance-only") {
+          try await qualificationPerformance(runtime, loadingTime: started.duration(to: .now))
+        } else {
+          try await qualification(runtime, loadingTime: started.duration(to: .now))
+        }
+      } catch {
+        await runtime.unload()
+        print("QUAL failed; no hardware qualified")
+        exit(EXIT_FAILURE)
+      }
       await runtime.unload()
       return
     }
