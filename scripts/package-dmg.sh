@@ -78,6 +78,27 @@ grep -Fx 'TeamIdentifier=5U2B7W5F39' "$out/input-signature.txt" > /dev/null
 grep -Fx 'Identifier=dev.xchrisbailey.Tidy' "$out/input-signature.txt" > /dev/null
 grep -F 'Authority=Developer ID Application:' "$out/input-signature.txt" > /dev/null
 grep -E 'flags=.*runtime' "$out/input-signature.txt" > /dev/null
+if [[ "$flavor" == experimental-beta ]]; then
+  # Outer ZIP metadata is unsigned. Require the beta identity/source and license
+  # inside the verified code-signature seal before accepting a beta for imaging.
+  python3 - "$source_app" "$source_revision" <<'PY'
+from pathlib import Path
+import json, plistlib, sys
+app, source = Path(sys.argv[1]), sys.argv[2]
+try:
+    info = plistlib.loads((app / 'Contents/Info.plist').read_bytes())
+    record = json.loads((app / 'Contents/Resources/Tidy-BUILD.json').read_text())
+    valid = (info.get('CFBundleName') == 'Tidy Beta'
+        and info.get('CFBundleDisplayName') == 'Tidy Beta'
+        and record == {'schemaVersion': 1, 'applicationSource': source,
+            'packagingFlavor': 'experimental-beta', 'releaseTag': 'v0.1.0-beta.1'}
+        and (app / 'Contents/Resources/Tidy-LICENSE.txt').read_bytes() == Path('LICENSE').read_bytes())
+except (OSError, ValueError):
+    valid = False
+if not valid:
+    raise SystemExit('Missing or inconsistent signed experimental-beta metadata/license.')
+PY
+fi
 
 payload="$out/payload"
 mkdir "$payload"

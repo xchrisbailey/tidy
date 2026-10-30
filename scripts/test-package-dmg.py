@@ -2,6 +2,7 @@
 """Check the packaging CLI and mounted artifact without installing or launching Tidy."""
 
 import hashlib
+import copy
 import json
 import os
 from pathlib import Path
@@ -61,6 +62,26 @@ def main():
         ["bash", str(repo / "scripts/package-dmg.sh"), other_mode, str(archive)],
         cwd=repo, capture_output=True, text=True, timeout=30)
     assert rejected.returncode != 0, "Packaging modes must not relabel each other's archives"
+    if not beta:
+        # Renaming the outer app directory preserves its signature. Forging unsigned
+        # beta notes/provenance must still fail the signed bundle identity/source check.
+        forged = scratch / "relabeled-beta.zip"
+        with zipfile.ZipFile(archive) as source, zipfile.ZipFile(forged, "w") as target:
+            build = source.read(payload_name + "/BUILD.txt").decode()
+            for entry in source.infolist():
+                if entry.filename == payload_name + "/BUILD.txt":
+                    continue
+                renamed = copy.copy(entry)
+                renamed.filename = entry.filename.replace(payload_name, "Tidy-Experimental-Beta", 1).replace(
+                    "Tidy Unqualified Development.app", "Tidy Beta.app", 1)
+                target.writestr(renamed, source.read(entry))
+            target.writestr("Tidy-Experimental-Beta/BUILD.txt", build + "\nPackaging flavor: experimental-beta\n")
+            target.writestr("Tidy-Experimental-Beta/BETA-NOTES.md", "Experimental beta fixture\n")
+            target.writestr("Tidy-Experimental-Beta/LICENSE.txt", (repo / "LICENSE").read_bytes())
+        rejected = subprocess.run(
+            ["bash", str(repo / "scripts/package-dmg.sh"), "--experimental-beta", str(forged)],
+            cwd=repo, capture_output=True, text=True, timeout=60)
+        assert rejected.returncode != 0 and "signed experimental-beta metadata/license" in rejected.stderr, rejected.stdout + rejected.stderr
     result = subprocess.run(
         ["bash", str(repo / "scripts/package-dmg.sh"), mode, str(archive)],
         cwd=repo, capture_output=True, text=True, timeout=300)
@@ -98,6 +119,10 @@ def main():
             assert (mount / "LICENSE.txt").read_bytes() == (repo / "LICENSE").read_bytes()
             assert "experimental beta" in (mount / "BETA-NOTES.md").read_text().lower()
         app = mount / app_name
+        if beta:
+            provenance = json.loads((app / "Contents/Resources/Tidy-BUILD.json").read_text())
+            assert provenance["applicationSource"] == manifest["applicationSource"]
+            assert provenance["packagingFlavor"] == flavor
         subprocess.run(["codesign", "--verify", "--deep", "--strict", str(app)],
                        check=True, capture_output=True)
         prefix = payload_name + "/" + app_name + "/"

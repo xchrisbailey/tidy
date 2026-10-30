@@ -56,6 +56,14 @@ fi
 cp Packaging/Info.plist "$app/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleName $app_name" "$app/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string $app_name" "$app/Contents/Info.plist"
+python3 - "$app" "$source_revision" "$flavor" <<'PY'
+from pathlib import Path
+import json, sys
+app, source, flavor = sys.argv[1:]
+record = {'schemaVersion': 1, 'applicationSource': source, 'packagingFlavor': flavor,
+    'releaseTag': 'v0.1.0-beta.1' if flavor == 'experimental-beta' else None}
+Path(app, 'Contents/Resources/Tidy-BUILD.json').write_text(json.dumps(record, indent=2) + '\n')
+PY
 # Keep the real sandbox/bookmark identity for qualification; do not imply isolation
 # from an existing development install. Sign nested code before the containing app.
 service="$app/Contents/XPCServices/dev.tidy.inspection.xpc"
