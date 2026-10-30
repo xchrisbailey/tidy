@@ -669,6 +669,8 @@ struct ContentNamingTests {
     [
       "Give files readable names from their contents in English",
       "Translate filenames into English based on contents",
+      "Translate filenames into English based on the contents of reports",
+      "Translate filenames into English based on contents and sort documents by type",
     ])
   func explicitRequestedLanguageAllowsOnlyGroundedDescriptorTranslation(
     suppliedLanguage: String, request: String
@@ -681,12 +683,16 @@ struct ContentNamingTests {
     ).write(to: fixture.folder.appendingPathComponent("scan.txt"))
     let coordinator = TaskCoordinator(bookmarkFile: fixture.bookmark)
     _ = try await coordinator.selectFolderForWriting(fixture.folder)
+    let sort = request.contains("sort documents") ? "type" : "none"
+    let effects = sort == "none" ? "rename" : "sort+rename"
     let intent = try metadataResponse(
-      request: request, sort: "none",
-      rename: [["kind": "content", "evidence": request, "value": "English", "from": ""]])
+      request: request, sort: sort,
+      rename: [["kind": "content", "evidence": request, "value": "English", "from": ""]],
+      clauses: [["text": request, "effect": effects]])
     let supplied = try metadataResponse(
-      request: request, sort: "none",
-      rename: [["kind": "content", "evidence": request, "value": suppliedLanguage, "from": ""]])
+      request: request, sort: sort,
+      rename: [["kind": "content", "evidence": request, "value": suppliedLanguage, "from": ""]],
+      clauses: [["text": request, "effect": effects]])
     let sequence = ResponseSequence(
       (suppliedLanguage == "English" ? [] : [supplied]) + [
         intent,
@@ -705,8 +711,8 @@ struct ContentNamingTests {
     try await coordinator.undoTask(plan.id)
   }
 
-  @Test(arguments: ["Dutch", "Japanese"])
-  func unsupportedOutputLanguageCannotBeSilentlyOmitted(language: String) async throws {
+  @Test(arguments: ["Dutch", "Japanese", "English and Japanese", "English and French"])
+  func unsupportedOrMultipleOutputLanguagesRequireClarification(language: String) async throws {
     let fixture = try LanguageFixture()
     defer { fixture.remove() }
     try Data("Factura Acme AB123 2026-10-28".utf8).write(
@@ -716,7 +722,12 @@ struct ContentNamingTests {
     let request = "Give files readable names from contents in \(language)"
     let omitted = try metadataResponse(
       request: request, sort: "none",
-      rename: [["kind": "content", "evidence": request, "value": "", "from": ""]])
+      rename: [
+        [
+          "kind": "content", "evidence": request,
+          "value": language.hasPrefix("English") ? "English" : "", "from": "",
+        ]
+      ])
     let clarification = try metadataResponse(
       request: request, status: "clarification", sort: "none", decisions: [],
       message: "Choose a supported filename language or keep the source language.")

@@ -235,7 +235,7 @@ struct MetadataIntent: Decodable {
     else { throw IntentViolation.selection }
     // Optional model fields cannot erase a recognizable restriction in the user's request.
     // Check authority before expansion or content inspection treats an empty filter as all files.
-    let parts = try selectionClauses(request)
+    let parts = try requestClauses(request)
     let actionClauses = parts.actions
     let selectionRequest = actionClauses.joined(separator: " ")
     var boundScope: SelectionRestrictions?
@@ -382,7 +382,7 @@ private func selectionRestrictions(in clause: String) throws -> SelectionRestric
   return result
 }
 
-private func selectionClauses(_ request: String) throws -> (
+func requestClauses(_ request: String) throws -> (
   actions: [String], constraints: [String]
 ) {
   // Split the request independently of the model's clause/effect declarations. Quoted literals
@@ -392,7 +392,7 @@ private func selectionClauses(_ request: String) throws -> (
   let sorting =
     #"sort\w*|mov(?:e|ing)|put\w*|organi[sz]\w*|group\w*|arrang\w*|bucket\w*|collect\w*|separat\w*|stor\w*|categori[sz]\w*|classif\w*|plac\w*|relocat\w*"#
   let naming =
-    #"renam\w*|giv(?:e|ing)|lower[ -]?case|upper[ -]?case|title[ -]?case|all\s+caps|capitaliz\w*|replac\w*|chang\w*|us(?:e|ing)|swap\w*|normaliz\w*|substitut\w*|prepend\w*|append\w*|prefix|suffix|start\w*|begin\w*"#
+    #"renam\w*|translat\w*|giv(?:e|ing)|lower[ -]?case|upper[ -]?case|title[ -]?case|all\s+caps|capitaliz\w*|replac\w*|chang\w*|us(?:e|ing)|swap\w*|normaliz\w*|substitut\w*|prepend\w*|append\w*|prefix|suffix|start\w*|begin\w*"#
   let boundaries = try NSRegularExpression(
     pattern:
       #"[\"“][^\"”]*[\"”]|‘[^’]*’|(?<!\w)'[^']*'(?!\w)|(?:\s+(?:and|but|then|while)\s+|[,;.!?]\s*|\s+(?=(?:preserving|keeping|retaining|leaving)\b))(?=(?:please\s+)?(?:"#

@@ -412,6 +412,8 @@ struct MetadataIntentTests {
     "Sort by type and translate the reports into French",
     "Sort by type and translate filenames and document contents into French",
     "Sort by type and translate filenames into English and document contents into French",
+    "Sort by type and translate filenames and their text into French",
+    "Sort by type and translate filenames into English and file text into French",
   ])
   func mixedContentTranslationCannotHideInsideSupportedClause(request: String) async throws {
     let fixture = try LanguageFixture()

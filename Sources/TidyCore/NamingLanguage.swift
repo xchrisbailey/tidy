@@ -77,10 +77,27 @@ private let namingLanguageAliases: [String: String] = {
 
 func explicitNamingLanguages(in request: String) -> Set<String> {
   let lower = request.lowercased()
-  return Set(
+  var languages = Set(
     namingLanguageAliases.compactMap { name, code in
       namingLanguageMention(name, request: lower) ? code : nil
     })
+  let instruction = metadataInstructionText(request)
+  // An output-language introducer also governs a coordinated list, not only its
+  // first language. A model cannot silently select one member of that list.
+  let lists = instruction.matches(of: /\b(?:in|into|to|en|auf|em|en langue|in lingua)\s+([^.;!?]+)/)
+  for list in lists {
+    let parts = String(list.output.1).replacingOccurrences(
+      of: #"\s+(?:and|or)\s+|,\s*"#, with: "\n", options: .regularExpression
+    ).components(separatedBy: "\n")
+    for part in parts {
+      let text = part.trimmingCharacters(in: .whitespaces)
+      let language = namingLanguageAliases.filter { name, _ in
+        text == name || text.hasPrefix(name + " ")
+      }.max { $0.key.count < $1.key.count }
+      if let language { languages.insert(language.value) }
+    }
+  }
+  return languages
 }
 
 func requestedNamingLanguage(_ value: String, request: String) -> String? {

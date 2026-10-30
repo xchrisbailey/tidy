@@ -163,17 +163,21 @@ extension TaskCoordinator {
         with: "", options: .regularExpression)
     // Translation of filenames can be a naming instruction; translation of documents
     // cannot disappear inside a model-declared sorting clause.
-    let translations = unquoted.matches(of: /\btranslat(?:e|ing)\b([^,;.!?]*)/)
+    guard let clauses = try? requestClauses(unquoted).actions else { return true }
+    let translations = clauses.flatMap {
+      $0.matches(of: /\btranslat(?:e|ing)\b([^,;.!?]*)/)
+    }
     let translatesContents = translations.contains { match in
       let object = String(match.output.1).trimmingCharacters(in: .whitespaces)
         .replacingOccurrences(
           of: #"^(?:(?:the|these|all|my)\s+)+"#, with: "", options: .regularExpression
         )
         .replacingOccurrences(
-          of: #"\b(?:based\s+on|from|using)\s+(?:(?:their|the|file|document)\s+)*contents?\b"#,
+          of:
+            #"\b(?:based\s+on|from|using)\s+(?:(?:their|the|file|document)\s+)*(?:contents?|text)\b(?:\s+of\s+(?:(?:the|these|my)\s+)?(?:files?|documents?|reports?)\b)?"#,
           with: "", options: .regularExpression)
       return object.range(of: #"^(?:file\s*names?|names?)\b"#, options: .regularExpression) == nil
-        || containsWord(object, ["contents", "content", "documents", "reports"])
+        || containsWord(object, ["contents", "content", "text", "documents", "reports"])
     }
     return translatesContents
       || containsWord(
