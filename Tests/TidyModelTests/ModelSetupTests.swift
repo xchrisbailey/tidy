@@ -4,6 +4,29 @@ import TidyModel
 
 @MainActor
 struct ModelSetupTests {
+  @Test func repeatedPassiveRestorationKeepsReadyInferenceRunning() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let runtime = ControlledRuntime()
+    let setup = ModelSetup(
+      root: root, manifest: fixtureManifest, transfer: ControlledTransfer(), runtime: runtime)
+    await setup.download(consent: true)
+    let inference = Task { await runtime.generate() }
+    await runtime.waitForGeneration()
+    async let first: Void = setup.restore()
+    async let second: Void = setup.restore()
+    _ = await (first, second)
+    #expect(setup.state == .ready)
+    #expect(setup.activeManifest?.revision == "test-v1")
+    #expect(await runtime.loads == 1)
+    #expect(await runtime.unloads == 1)
+    await runtime.finishGeneration()
+    #expect(await inference.value == "Finished requested plan")
+    await setup.remove(revision: "test-v1", consent: true)
+    #expect(setup.state == .awaitingConsent)
+    #expect(await runtime.loadedRevision == nil)
+  }
+
   @Test func replacementPauseResumeAndCancellationKeepOriginalUsableAndCleanPartials() async throws
   {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -228,8 +251,10 @@ struct ModelSetupTests {
     #expect(await transfer.requests == 1)
     #expect(await runtime.loads == 2)
     try Data("bad".utf8).write(to: setup.modelDirectory.appendingPathComponent("config.json"))
-    await reopened.restore()
-    #expect(reopened.state != .ready)
+    let relaunched = ModelSetup(
+      root: root, manifest: fixtureManifest, transfer: transfer, runtime: runtime)
+    await relaunched.restore()
+    #expect(relaunched.state != .ready)
     #expect(await runtime.loads == 2)
   }
 
@@ -277,6 +302,23 @@ private actor ControlledTransfer: ModelTransfer {
 }
 
 private actor ControlledRuntime: LocalModelRuntime {
+  private var generation: CheckedContinuation<String, Never>?
+  private var generationStarted: CheckedContinuation<Void, Never>?
+  func generate() async -> String {
+    await withCheckedContinuation {
+      generation = $0
+      generationStarted?.resume()
+      generationStarted = nil
+    }
+  }
+  func waitForGeneration() async {
+    if generation != nil { return }
+    await withCheckedContinuation { generationStarted = $0 }
+  }
+  func finishGeneration() {
+    generation?.resume(returning: "Finished requested plan")
+    generation = nil
+  }
   private(set) var loads = 0
   private(set) var unloads = 0
   private(set) var loadedRevision: String?
@@ -296,6 +338,8 @@ private actor ControlledRuntime: LocalModelRuntime {
     loadedRevision = directory.lastPathComponent
   }
   func unload() async {
+    generation?.resume(returning: "Interrupted by unload")
+    generation = nil
     unloads += 1
     loadedRevision = nil
   }

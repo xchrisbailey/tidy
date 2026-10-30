@@ -1,8 +1,40 @@
 import Foundation
 import Testing
 import TidyCore
+import os
 
 struct HistoryTests {
+  @Test @MainActor func historyUndoCancellationRetainsCompletedReversals() async throws {
+    let fixture = try HistoryFixture()
+    defer { fixture.remove() }
+    try Data("second".utf8).write(to: fixture.folder.appendingPathComponent("other.txt"))
+    let gate = UndoCheckpointGate()
+    let coordinator = TaskCoordinator(bookmarkFile: fixture.bookmark) { point in
+      if point == .undoCompletionSaved { gate.pauseOnce() }
+    }
+    _ = try await coordinator.selectFolderForWriting(fixture.folder)
+    let plan = try await coordinator.planSortByType(request: "Sort by type")
+    _ = try await coordinator.execute(plan)
+    let undo = HistoryUndo()
+    undo.start(plan.id, fileOnly: false, coordinator: coordinator)
+    await gate.waitUntilPaused()
+    #expect(undo.isWorking)
+    undo.cancel()
+    #expect(undo.isCancelling)
+    gate.resume()
+    await undo.waitUntilFinished()
+    #expect(!undo.isWorking)
+    #expect(undo.message?.contains("Undo cancelled") == true)
+    #expect(undo.message?.contains("1 of 2") == true)
+    let history = try await TaskCoordinator(bookmarkFile: fixture.bookmark).historySnapshot()
+    #expect(history.operations.filter { $0.state == .undone }.count == 1)
+    #expect(history.operations.filter { $0.state == .completed }.count == 1)
+    for entry in history.operations {
+      let expectedPath = entry.state == .undone ? entry.originalPath : entry.resultingPath
+      #expect(FileManager.default.fileExists(atPath: expectedPath))
+    }
+  }
+
   @Test func clearRequiresConfirmationAndOnlyDiscardsRecoveryRecordsAcrossReopen() async throws {
     let fixture = try HistoryFixture()
     defer { fixture.remove() }
@@ -63,6 +95,37 @@ struct HistoryTests {
     #expect(try await reopened.historySnapshot().operations.first?.state == .undone)
     #expect(try Data(contentsOf: fixture.source) == fixture.content)
   }
+}
+
+private final class UndoCheckpointGate: Sendable {
+  private let state = OSAllocatedUnfairLock(initialState: UndoGateState())
+  private let release = DispatchSemaphore(value: 0)
+
+  func pauseOnce() {
+    let shouldPause = state.withLock { state in
+      guard !state.paused else { return false }
+      state.paused = true
+      state.waiter?.resume()
+      state.waiter = nil
+      return true
+    }
+    if shouldPause { release.wait() }
+  }
+
+  func waitUntilPaused() async {
+    await withCheckedContinuation { continuation in
+      state.withLock { state in
+        if state.paused { continuation.resume() } else { state.waiter = continuation }
+      }
+    }
+  }
+
+  func resume() { release.signal() }
+}
+
+private struct UndoGateState: Sendable {
+  var paused = false
+  var waiter: CheckedContinuation<Void, Never>?
 }
 
 private struct HistoryFixture {

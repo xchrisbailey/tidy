@@ -201,11 +201,10 @@ public final class ModelSetup {
     await perform(allowDownload: true)
   }
 
-  /// Restoring an installation never requests network access and never trusts cached readiness.
+  /// A new lifecycle verifies installed files offline; passive windows share an already-ready runtime.
   public func restore() async {
-    guard hardware.unavailability == nil, !isBusy else { return }
+    guard hardware.unavailability == nil, !isBusy, activeManifest == nil else { return }
     activity = .verifying
-    activeManifest = nil
     if let revision = try? String(contentsOf: selection, encoding: .utf8),
       let selected = catalog.first(where: { $0.revision == revision })
     {

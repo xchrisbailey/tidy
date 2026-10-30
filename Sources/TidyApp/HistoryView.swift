@@ -10,6 +10,9 @@ struct HistoryView: View {
   @State private var errorMessage: String?
   @State private var isWorking = false
   @State private var confirmsClear = false
+  @State private var undoActivity = HistoryUndo()
+
+  private var isBusy: Bool { isWorking || undoActivity.isWorking }
 
   var body: some View {
     VStack(alignment: .leading, spacing: 16) {
@@ -20,6 +23,7 @@ struct HistoryView: View {
         Button("Clear History…", role: .destructive) { confirmsClear = true }
           .disabled(snapshot?.operations.isEmpty != false)
       }
+      .disabled(isBusy)
       Text(
         "Recovery records are kept on this Mac until you explicitly clear them. They contain paths and recovery information, not document excerpts. History is not a backup."
       )
@@ -52,7 +56,7 @@ struct HistoryView: View {
                         Text(report.status.rawValue.capitalized)
                         Text(report.explanation)
                       } else {
-                        Text(entry.historyOutcome)
+                        Text(entry.state.explanation)
                       }
                       Text("Original: \(entry.originalPath)")
                       Text("Resulting: \(entry.resultingPath)")
@@ -71,9 +75,23 @@ struct HistoryView: View {
               }
             }
           }
+          .disabled(isBusy)
         }
       }
       if isWorking { ProgressView().controlSize(.small) }
+      if undoActivity.isWorking {
+        HStack {
+          ProgressView().controlSize(.small)
+          Button(undoActivity.isCancelling ? "Cancelling…" : "Cancel Undo") {
+            undoActivity.cancel()
+          }
+          .disabled(undoActivity.isCancelling)
+          .accessibilityIdentifier("history-cancel-undo")
+        }
+      }
+      if let message = undoActivity.message {
+        Text(message).accessibilityIdentifier("history-undo-progress")
+      }
       if let errorMessage {
         Label(errorMessage, systemImage: "exclamationmark.triangle")
           .foregroundStyle(.orange).textSelection(.enabled)
@@ -83,11 +101,13 @@ struct HistoryView: View {
       )
       .font(.caption).foregroundStyle(.secondary)
       Button("Grant Original Folder Access…") { grantFolder() }
+        .disabled(isBusy)
     }
     .padding(24)
     .frame(minWidth: 720, minHeight: 480)
-    .disabled(isWorking)
     .task { refresh() }
+    .onDisappear { undoActivity.cancel() }
+    .onChange(of: undoActivity.isWorking) { _, working in if !working { refresh() } }
     .onChange(of: scenePhase) { _, phase in if phase == .active { refresh() } }
     .alert("Permanently clear undo history?", isPresented: $confirmsClear) {
       Button("Cancel", role: .cancel) {}
@@ -108,9 +128,8 @@ struct HistoryView: View {
   }
 
   private func undo(_ id: UUID, fileOnly: Bool) {
-    perform {
-      if fileOnly { try await coordinator.undoFile(id) } else { try await coordinator.undoTask(id) }
-    }
+    guard !isBusy else { return }
+    undoActivity.start(id, fileOnly: fileOnly, coordinator: coordinator)
   }
 
   private func grantFolder() {
@@ -130,7 +149,7 @@ struct HistoryView: View {
   }
 
   private func perform(_ action: @escaping () async throws -> Void) {
-    guard !isWorking else { return }
+    guard !isBusy else { return }
     isWorking = true
     errorMessage = nil
     Task {
@@ -144,18 +163,6 @@ struct HistoryView: View {
         recovery = []
         errorMessage = error.localizedDescription
       }
-    }
-  }
-}
-
-extension FileOperation {
-  fileprivate var historyOutcome: String {
-    switch state {
-    case .intent: "Interrupted or incomplete — identity check required"
-    case .completed: "Moved — available for best-effort undo"
-    case .undoIntent: "Undo interrupted — identity check required"
-    case .undone: "Undone"
-    case .notApplied: "Not moved — interrupted before the move"
     }
   }
 }

@@ -20,7 +20,7 @@ enum IntentViolation: String, Error {
   case renameLiteral =
     "A prefix/suffix rule needs its action word AND the exact quoted literal in its evidence. Copy the user's literal including case and whitespace; from must be empty."
   case selection =
-    "Selection evidence must quote an explicitly requested extension or exact quoted name substring, never a generic word like files. If extensions and nameContains are both empty, evidence MUST also be empty: {\"extensions\":[],\"nameContains\":\"\",\"evidence\":\"\"}, and REMOVE selection from clause effects (use rename, not rename+selection, for content naming without a filter). Do not infer a filter from inventory. A clause declaring a filter must include the selection effect."
+    "Preserve every explicit extension and quoted name-substring restriction from the request; never omit or broaden one. Exact-file selection is not supported: ask for clarification instead of using a substring filter. Selection evidence must quote an explicitly requested extension or exact quoted name substring, never a generic word like files. If extensions and nameContains are both empty, evidence MUST also be empty: {\"extensions\":[],\"nameContains\":\"\",\"evidence\":\"\"}, and REMOVE selection from clause effects (use rename, not rename+selection, for content naming without a filter). Do not infer a filter from inventory. A clause declaring a filter must include the selection effect."
   case clauses =
     "Each clause must correspond to an actual declared rule or a preservation constraint; do not hide unsupported actions."
 }
@@ -231,6 +231,74 @@ struct MetadataIntent: Decodable {
     guard selection.extensions.count <= 16,
       Set(selection.extensions).count == selection.extensions.count
     else { throw IntentViolation.selection }
+    // Optional model fields cannot erase a recognizable restriction in the user's request.
+    // Check authority before expansion or content inspection treats an empty filter as all files.
+    let instruction = metadataInstructionText(request)
+    let knownExtensions = [
+      "pdf", "txt", "md", "markdown", "rtf", "doc", "docx", "csv", "tsv", "xls", "xlsx",
+      "ppt", "pptx", "jpg", "jpeg", "png", "gif", "heic", "tiff", "svg", "webp",
+      "mp3", "wav", "m4a", "mp4", "mov", "zip", "json", "xml", "html",
+    ]
+    var requestedExtensions = Set(
+      knownExtensions.filter {
+        containsWord(instruction, [$0, $0 + "s"])
+      })
+    let dotted = try NSRegularExpression(pattern: #"(?<![a-z0-9])\.([a-z0-9]{1,10})\b"#)
+    for match in dotted.matches(
+      in: instruction, range: NSRange(instruction.startIndex..., in: instruction))
+    {
+      if let range = Range(match.range(at: 1), in: instruction) {
+        requestedExtensions.insert(String(instruction[range]))
+      }
+    }
+    let quotedExtension = try NSRegularExpression(
+      pattern: #"(?i)[\"“‘']\.([a-z0-9]{1,10})[\"”’']\s+(?:files?|documents?)\b"#)
+    for match in quotedExtension.matches(
+      in: request, range: NSRange(request.startIndex..., in: request))
+    {
+      if let range = Range(match.range(at: 1), in: request) {
+        requestedExtensions.insert(request[range].lowercased())
+      }
+    }
+    if !requestedExtensions.isEmpty,
+      Set(selection.extensions.map { $0.lowercased() }) != requestedExtensions
+    {
+      throw IntentViolation.selection
+    }
+    let nameFilter = try NSRegularExpression(
+      pattern:
+        #"(?i)\b(?:names?|filenames?|files?)\s+(?:that\s+)?(?:contain(?:s|ing)?|include(?:s|ing)?|matching)\s+[\"“‘']([^\"”’']+)[\"”’']"#
+    )
+    var nameRestrictions = Set<String>()
+    for match in nameFilter.matches(in: request, range: NSRange(request.startIndex..., in: request))
+    {
+      guard let range = Range(match.range(at: 1), in: request),
+        selection.nameContains == String(request[range])
+      else { throw IntentViolation.selection }
+      nameRestrictions.insert(String(request[range]))
+    }
+    // Exact-file selection is not representable by the substring filter. Require clarification
+    // instead of treating a quoted file name as authority over its neighbours.
+    if request.range(
+      of: #"(?i)\b(?:file|files?\s+(?:named|called))\s+[\"“‘'][^\"”’']+[\"”’']"#,
+      options: .regularExpression) != nil
+    {
+      throw IntentViolation.selection
+    }
+    let quotedFile = try NSRegularExpression(
+      pattern: #"[\"“‘']([^\"”’']+\.[a-zA-Z0-9]{1,10})[\"”’']"#)
+    for match in quotedFile.matches(in: request, range: NSRange(request.startIndex..., in: request))
+    {
+      guard let range = Range(match.range(at: 1), in: request) else { continue }
+      let literal = String(request[range])
+      let isRuleParameter =
+        rename.contains {
+          ["prefix", "suffix"].contains($0.kind) && $0.value == literal
+        } || (sort.kind == "folder" && sort.value == literal)
+      guard isRuleParameter || nameRestrictions.contains(literal) else {
+        throw IntentViolation.selection
+      }
+    }
     if !selection.extensions.isEmpty || !selection.nameContains.isEmpty {
       guard evidence(selection.evidence, effect: "selection"),
         selection.extensions.allSatisfy({ ext in

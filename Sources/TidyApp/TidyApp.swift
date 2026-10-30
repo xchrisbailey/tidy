@@ -335,18 +335,6 @@ private struct InventoryView: View {
   }
 }
 
-extension OperationState {
-  fileprivate var explanation: String {
-    switch self {
-    case .intent: "Interrupted or incomplete — identity check required"
-    case .completed: "Changed — available for undo"
-    case .undoIntent: "Undo interrupted — identity check required"
-    case .undone: "Undone"
-    case .notApplied: "Not changed — interrupted before the change"
-    }
-  }
-}
-
 extension SkipReason {
   fileprivate var explanation: String {
     switch self {

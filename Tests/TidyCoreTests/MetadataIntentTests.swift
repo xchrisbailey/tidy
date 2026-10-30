@@ -3,6 +3,75 @@ import Testing
 import TidyCore
 
 struct MetadataIntentTests {
+  @Test(arguments: [
+    "Give PDFs readable names based on their contents",
+    "Give .txt files readable names based on their contents",
+    "Give files whose names contain ‘Report’ readable names based on their contents",
+    "Give files containing ‘Report’ readable names based on their contents",
+    "Give the file ‘Report.txt’ a readable name based on its contents",
+    "Give ‘Report.txt’ a readable name based on its contents",
+    "Give ‘.pdf’ files readable names based on their contents",
+  ])
+  func omittedExplicitSelectionCannotAuthorizeContentInspection(request: String) async throws {
+    let fixture = try LanguageFixture()
+    defer { fixture.remove() }
+    for name in ["Report.pdf", "Report.txt", "unrelated.txt", "photo.png"] {
+      try Data("Private unrelated content must not reach inference.".utf8)
+        .write(to: fixture.folder.appendingPathComponent(name))
+    }
+    let coordinator = TaskCoordinator(bookmarkFile: fixture.bookmark)
+    _ = try await coordinator.selectFolderForWriting(fixture.folder)
+    let response = try metadataResponse(
+      request: request, sort: "none",
+      rename: [["kind": "content", "evidence": request, "value": "", "from": ""]],
+      decisions: []
+    )
+    .replacingOccurrences(of: "\"files\":[]", with: "\"files\":\"all\"")
+    await #expect(throws: PlanningError.invalidResponse) {
+      try await coordinator.planTask(request: request) { _, prompt, _ in
+        #expect(!prompt.contains("Private unrelated content"))
+        return response
+      }
+    }
+    #expect(try await coordinator.undoHistory().isEmpty)
+    #expect(try FileManager.default.contentsOfDirectory(atPath: fixture.folder.path).count == 4)
+  }
+
+  @Test func replacementRestoresExplicitNameAndExtensionRestrictionsBeforeMutation() async throws {
+    let fixture = try LanguageFixture()
+    defer { fixture.remove() }
+    for name in ["Report.txt", "other.txt", "Report.md"] { try fixture.write(name) }
+    let coordinator = TaskCoordinator(bookmarkFile: fixture.bookmark)
+    _ = try await coordinator.selectFolderForWriting(fixture.folder)
+    let request = "Lowercase TXT filenames containing ‘Report’"
+    let omitted = try metadataResponse(
+      request: request, sort: "none",
+      rename: [["kind": "lowercase", "evidence": request, "value": "", "from": ""]],
+      decisions: []
+    )
+    .replacingOccurrences(of: "\"files\":[]", with: "\"files\":\"all\"")
+    let restored =
+      omitted
+      .replacingOccurrences(of: "\"effect\":\"rename\"", with: "\"effect\":\"rename+selection\"")
+      .replacingOccurrences(
+        of: "\"selection\":{\"evidence\":\"\",\"extensions\":[],\"nameContains\":\"\"}",
+        with:
+          "\"selection\":{\"evidence\":\"\(request)\",\"extensions\":[\"txt\"],\"nameContains\":\"Report\"}"
+      )
+    let responses = ResponseSequence([omitted, restored])
+    let outcome = try await coordinator.planTask(request: request) { _, _, _ in
+      await responses.next()
+    }
+    guard case .plan(let plan) = outcome else {
+      Issue.record("Expected corrected selection")
+      return
+    }
+    #expect(await responses.count == 2)
+    #expect(plan.changes.count == 1)
+    #expect(plan.changes.first?.originalName == "Report.txt")
+    #expect(try await coordinator.undoHistory().isEmpty)
+  }
+
   @Test func bareDateSortClarifiesSourceAndPrecisionBeforeProposingMutations() async throws {
     let fixture = try LanguageFixture()
     defer { fixture.remove() }
