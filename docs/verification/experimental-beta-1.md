@@ -84,3 +84,17 @@ Retained in `.build/beta-publication/` with `SHA256SUMS`, Apple log, Gatekeeper
 outputs and machine-readable receipt. Publication remains conditional on the
 recorded approval and exact-artifact upload verification; the unnotarized ZIP
 is not a public release asset.
+
+## Publication verified
+
+PR #20 merged at `55404f3`. GitHub prerelease `v0.1.0-beta.1` targets the exact
+tested app source `6bcb430a8680d22d36ec63a64e281f3368dea80b`; only the final
+notarized DMG and `SHA256SUMS` were uploaded. Both draft-asset digests and anonymous
+public downloads match the recorded final SHA-256. No credentials are required to
+download them. The diagnostic ZIP was not published.
+
+Release: https://github.com/xchrisbailey/tidy/releases/tag/v0.1.0-beta.1.
+Landing page: https://tidy.srcery.computer/; owner-managed CNAME preserved, HTTPS
+verified/enforced. Pages deployment from `9485a72` succeeded. Browser verification
+confirmed the beta CTA reaches the public release; automated page accessibility
+reported zero violations. This does not perform the separate native-app review #18.
