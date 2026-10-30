@@ -13,9 +13,10 @@ a Mac duplicate finder/disk-tidiness product with direct ZIP downloads. That is 
 related name/product area, not proof of infringement or permission. Do not treat
 an available repository, bundle identifier, domain or App Store name as clearance.
 
-The [USPTO search guidance](https://www.uspto.gov/trademarks/search) links federal
-and comprehensive similar-mark searches; reading it is not performing a clearance
-search. No exhaustive registry/common-law/international search, legal opinion,
+The [USPTO search guidance](https://www.uspto.gov/trademarks/search) and
+[comprehensive clearance guidance](https://www.uspto.gov/trademarks/search/comprehensive-clearance-search-similar-trademarks)
+call for similar-mark, common-law and registry research; reading them is not a
+clearance search. No exhaustive registry/common-law/international search, legal opinion,
 domain/social reservation, or right to use this name has been obtained. Owner must
 choose target jurisdictions, resolve confusingly similar names and get appropriate
 legal review or select another name before public use. No registrations/accounts
@@ -34,13 +35,21 @@ They do not package model weights or silently rename `.build/Tidy.app` as a rele
 From the clean committed worktree `/Users/chris/dev/utils/tidy-ticket-16`:
 
 ```sh
-swift test --configuration release --disable-automatic-resolution
+swift test --disable-automatic-resolution
 bash scripts/lint.sh
 git diff --check
 bash scripts/package-candidate.sh --unqualified
 # Pass the exact output directory printed above, not a guessed “latest” path:
 bash scripts/candidate-smoke.sh /absolute/path/to/unqualified-output-directory
 ```
+
+Also record `swift test --configuration release --disable-automatic-resolution`:
+the current unbundled release test runner fails PDF/OCR tests with inspection
+`unavailable`, because the SwiftPM supervisor adapter is intentionally DEBUG-only.
+Production/release inspection requires the packaged XPC service. Do not add an
+in-process parser or release CLI fallback to turn this into a pass. The complete
+debug suite and optimized packaged diagnostic are distinct evidence; neither
+erases the release CLI suite failure or substitutes for final-app qualification.
 
 Default authorized certificate SHA-1:
 `DDB64DD6A0BB35AA612980AEDD27B781C6A1E6F0`, Developer ID Application:

@@ -51,7 +51,8 @@ codesign --verify --deep --strict --verbose=2 "$app"
 codesign --display --verbose=4 "$app" 2> "$out/signature.txt"
 codesign --display --entitlements :- "$app" > "$out/entitlements.plist"
 cp docs/install.md "$payload/READ-ME-FIRST.md"
-cp docs/distribution.md "$payload/DISTRIBUTION-BLOCKED.md"
+cp docs/distribution.md "$payload/distribution.md"
+cp -R docs/verification "$payload/verification"
 {
   echo 'PUBLIC RELEASE BLOCKED; SUPPORTED HARDWARE: NONE QUALIFIED'
   echo 'Not notarized. No clean-user or native GUI acceptance claimed.'
