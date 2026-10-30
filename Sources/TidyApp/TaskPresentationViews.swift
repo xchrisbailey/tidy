@@ -65,10 +65,15 @@ struct WorkspaceActivity: View {
           if model.undoActivity.isWorking, let progress = model.undoActivity.progress {
             ProgressView(value: Double(progress.processed), total: Double(max(1, progress.total)))
               .frame(width: 100).accessibilityLabel("Undo progress")
+              .accessibilityValue(
+                "\(progress.processed) of \(progress.total) checked; \(progress.undone) undone")
             Text("\(progress.processed) of \(progress.total) checked · \(progress.undone) undone")
           } else if let progress = model.progress {
             ProgressView(value: Double(progress.processed), total: Double(max(1, progress.total)))
               .frame(width: 100).accessibilityLabel("Task progress")
+              .accessibilityValue(
+                "\(progress.processed) of \(progress.total) planned changes processed; \(progress.changed) changed"
+              )
             Text(
               "\(progress.processed) of \(progress.total) planned changes processed · \(progress.changed) changed"
             )
@@ -79,6 +84,7 @@ struct WorkspaceActivity: View {
           Spacer(minLength: 8)
           Button(model.phase == .cancelling ? "Stopping…" : "Cancel") { model.cancel() }
             .disabled(!model.canCancel)
+            .accessibilityLabel(model.undoActivity.isWorking ? "Cancel Undo" : "Cancel Task")
             .accessibilityIdentifier("cancel-workspace-task")
         }
       } else if let feedback = model.feedback {
@@ -94,7 +100,13 @@ struct WorkspaceActivity: View {
           .help(feedback.detail).accessibilityIdentifier("task-result")
       }
       if let error = model.refreshError {
-        Label(error, systemImage: "exclamationmark.triangle").lineLimit(2).help(error)
+        HStack(alignment: .top) {
+          Label(error, systemImage: "exclamationmark.triangle").lineLimit(2).help(error)
+          if model.feedback == nil {
+            Spacer()
+            Button("Details") { showsResults = true }
+          }
+        }
       }
     }
     .font(.callout)
@@ -107,14 +119,28 @@ struct WorkspaceActivity: View {
 struct TaskResultsView: View {
   let result: BatchResult?
   let feedback: WorkspaceFeedback?
+  var refreshError: String? = nil
+  var geometry: WorkspaceGeometry? = nil
   @Environment(\.dismiss) private var dismiss
 
   var body: some View {
     VStack(alignment: .leading, spacing: 16) {
       Text(feedback?.title ?? "Task Details").font(.title2.weight(.semibold))
-      if let feedback { Text(feedback.detail).textSelection(.enabled) }
-      if let result {
-        List {
+      List {
+        if let feedback {
+          Section("Summary") {
+            Text(feedback.detail).textSelection(.enabled)
+              .fixedSize(horizontal: false, vertical: true)
+              .background(WorkspaceRegion(name: "results-message", geometry: geometry))
+          }
+        }
+        if let refreshError {
+          Section("Refresh Warning") {
+            Text(refreshError).textSelection(.enabled)
+              .fixedSize(horizontal: false, vertical: true)
+          }
+        }
+        if let result {
           if !result.changed.isEmpty {
             Section("Changed · \(result.changed.count)") {
               ForEach(result.changed) { entry in
@@ -141,12 +167,12 @@ struct TaskResultsView: View {
             }
           }
         }
-      } else {
-        Spacer(minLength: 0)
       }
+      .frame(minHeight: 0, maxHeight: .infinity)
       HStack {
         Spacer()
         Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
+          .background(WorkspaceRegion(name: "results-done", geometry: geometry))
       }
     }
     .padding(24).frame(width: 640, height: 510)

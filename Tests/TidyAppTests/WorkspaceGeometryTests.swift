@@ -59,12 +59,15 @@ struct WorkspaceGeometryTests {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(
       "tidy-geometry-\(UUID())")
     defer { try? FileManager.default.removeItem(at: root) }
-    let folder = root.appendingPathComponent("Downloads")
+    let folder = root.appendingPathComponent(String(repeating: "long-folder-", count: 8))
+      .appendingPathComponent("Downloads")
     try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
     for index in 0..<30 {
       try Data("layout fixture".utf8).write(
         to: folder.appendingPathComponent("document-\(index).txt"))
     }
+    let longName = String(repeating: "quarterly-report-", count: 12) + "October-2026.txt"
+    try Data("long name fixture".utf8).write(to: folder.appendingPathComponent(longName))
     let setup = try await layoutSetup(root: root)
     let coordinator = TaskCoordinator(
       bookmarkFile: root.appendingPathComponent("settings/folder.bookmark"))
@@ -75,6 +78,9 @@ struct WorkspaceGeometryTests {
       })
     model.inspect(folder)
     await model.waitUntilFinished()
+    #expect(model.inventory?.items.contains { $0.name == longName } == true)
+    model.request =
+      "Group by type, only filenames containing \"\(String(repeating: "project-", count: 40))\"."
     NSApplication.shared.setActivationPolicy(.prohibited)
     let window = NSWindow(
       contentRect: NSRect(x: -20000, y: -20000, width: 1080, height: 720),
@@ -89,7 +95,10 @@ struct WorkspaceGeometryTests {
       rootView: WorkspaceView(model: model, setup: setup, geometry: geometry))
     window.orderFront(nil)
     defer { window.close() }
-    for appearance in [NSAppearance.Name.aqua, .darkAqua] {
+    for appearance in [
+      NSAppearance.Name.aqua, .darkAqua,
+      .accessibilityHighContrastAqua, .accessibilityHighContrastDarkAqua,
+    ] {
       window.appearance = NSAppearance(named: appearance)
       for size in [NSSize(width: 1080, height: 720), NSSize(width: 900, height: 600)] {
         window.setContentSize(size)

@@ -42,7 +42,8 @@ struct HistoryView: View {
     }
     .onChange(of: selectedTask) { _, _ in selectedFile = task?.operations.first?.id }
     .sheet(isPresented: $showsResults) {
-      TaskResultsView(result: model.result, feedback: model.feedback)
+      TaskResultsView(
+        result: model.result, feedback: model.feedback, refreshError: model.refreshError)
     }
   }
 

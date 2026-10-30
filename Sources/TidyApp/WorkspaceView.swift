@@ -35,6 +35,9 @@ struct WorkspaceView: View {
           .padding(12)
         }
         .buttonStyle(.plain)
+        .accessibilityLabel("Local Model Settings")
+        .accessibilityValue(readiness)
+        .accessibilityHint("Opens settings to manage the local model.")
         .help("Open local model settings")
       }
     } detail: {
@@ -122,7 +125,8 @@ struct WorkspaceView: View {
       )
     }
     .sheet(isPresented: $showsResults) {
-      TaskResultsView(result: model.result, feedback: model.feedback)
+      TaskResultsView(
+        result: model.result, feedback: model.feedback, refreshError: model.refreshError)
     }
   }
 
@@ -193,6 +197,7 @@ struct WorkspaceView: View {
         ContentUnavailableView {
           if let image = NSImage(named: NSImage.Name("Tidy")) {
             Image(nsImage: image).resizable().frame(width: 96, height: 96)
+              .accessibilityHidden(true)
           } else {
             Label("Choose a folder", systemImage: "folder")
           }

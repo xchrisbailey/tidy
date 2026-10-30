@@ -89,7 +89,7 @@ coverage and the failed parallel stress attempt are recorded separately.
 The workspace suites can also run without a model download:
 
 ```sh
-swift test --disable-automatic-resolution --filter 'WorkspaceModelTests|SettingsLifecycleTests|WorkspaceGeometryTests'
+swift test --disable-automatic-resolution --filter TidyAppTests
 ```
 
 They use temporary file fixtures and injected local completions. Native geometry
