@@ -67,3 +67,29 @@ Developer ID identity and model-storage paths. Pause the old transfer and quit
 normally before opening the replacement; use Download / Resume, not Cancel and
 Remove Partials. Keep the original failed observations and record the retry as a
 new attempt with its new source/artifact hash. Public release remains blocked.
+
+## Replacement handoff
+
+Application source: `b422b36fa0db7d6eee0e030200d2de7285aa5e36` on `release/v1`.
+Developer ID hardened candidate built in a clean detached worktree and extracted
+with deep/strict signature verification. Bundle identifier and model-storage
+paths are unchanged. Preserved archive:
+
+```
+.build/direct-download/Tidy-Unqualified-b422b36-arm64.zip
+SHA-256: 40ee29c35ae67bdd35323efcb6ca8076c31f33b68ff46edf6855505ec8fd5dea
+```
+
+The regression also passed ten consecutive repetitions. The complete properly
+hosted optimized suite passed via `bash scripts/release-tests.sh`: 117 reported
+coordinator functions, 13 model functions and two supervisor functions, with the
+same provider skip. No new empirical naming/hardware qualification is claimed.
+
+The local native wizard now has `--retry-download` (replacement launch, resume,
+storage, summary) and `--continue-native` (remaining checks). It records the retry
+artifact source/hash and retains superseded observations in attempt history.
+The original failed setup/storage observations were not rewritten. The immutable
+wizard library, shell/Python syntax, and isolated report-history controls were
+checked; no native retry was performed by the agent. This replacement is not
+notarized, and public release remains blocked until actual native results and
+the other existing gates pass.
