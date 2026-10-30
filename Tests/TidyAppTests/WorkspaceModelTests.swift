@@ -7,6 +7,66 @@ import os
 
 @MainActor
 struct WorkspaceModelTests {
+  @Test(arguments: ["clarification", "unsupported", "idle"])
+  func newSubmissionInspectsCurrentFilesBeforePlanning(previousOutcome: String) async throws {
+    let fixture = try WorkspaceFixture(count: 1)
+    defer { fixture.remove() }
+    let model = WorkspaceModel(
+      coordinator: TaskCoordinator(bookmarkFile: fixture.bookmark),
+      modelIsReady: { true }, completion: { _, _, _ in sortResponse })
+    model.windowDidOpen()
+    model.inspect(fixture.folder, forWriting: true)
+    await model.waitUntilFinished()
+    if previousOutcome != "idle" {
+      model.request =
+        previousOutcome == "clarification" ? "Sort by date" : "Sort by type and delete files"
+      model.submit()
+      await model.waitUntilFinished()
+      #expect(model.feedback?.kind == .information)
+      #expect(model.result == nil)
+    }
+    let updated = Data("updated fixture with a different size".utf8)
+    try updated.write(to: fixture.folder.appendingPathComponent("file-0.txt"))
+    try Data("new arrival".utf8).write(to: fixture.folder.appendingPathComponent("new.txt"))
+    model.request = "Sort by type"
+    model.submit()
+    await model.waitUntilFinished()
+    #expect(model.result?.changed.count == 2)
+    #expect(model.result?.skipped.isEmpty == true)
+    #expect(model.history?.operations.count == 2)
+    #expect(
+      try Data(contentsOf: fixture.folder.appendingPathComponent("Documents/file-0.txt")) == updated
+    )
+    #expect(
+      try Data(contentsOf: fixture.folder.appendingPathComponent("Documents/new.txt"))
+        == Data("new arrival".utf8))
+  }
+
+  @Test func failedSubmissionRefreshCannotUseAnOldInventory() async throws {
+    let fixture = try WorkspaceFixture(count: 1)
+    defer { fixture.remove() }
+    let model = WorkspaceModel(
+      coordinator: TaskCoordinator(bookmarkFile: fixture.bookmark),
+      modelIsReady: { true },
+      completion: { _, _, _ in
+        Issue.record("An unavailable read grant must stop planning before inference")
+        return sortResponse
+      })
+    model.windowDidOpen()
+    model.inspect(fixture.folder, forWriting: true)
+    await model.waitUntilFinished()
+    try Data("corrupt bookmark".utf8).write(to: fixture.bookmark)
+    model.submit()
+    await model.waitUntilFinished()
+    #expect(model.feedback?.kind == .failure)
+    #expect(model.result == nil)
+    #expect(model.inventory == nil)
+    #expect(model.history?.operations.isEmpty == true)
+    #expect(
+      FileManager.default.fileExists(
+        atPath: fixture.folder.appendingPathComponent("file-0.txt").path))
+  }
+
   @Test func navigationDoesNotCancelPlanningOrLoseItsResult() async throws {
     let fixture = try WorkspaceFixture(count: 2)
     defer { fixture.remove() }

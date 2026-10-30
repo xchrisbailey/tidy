@@ -61,24 +61,43 @@ func descriptorLanguageMatches(_ text: String, original: String, language: Strin
   }
 }
 
-func requestedNamingLanguage(_ value: String, request: String) -> String? {
-  guard !value.isEmpty, request.contains(value) else { return nil }
-  let escaped = NSRegularExpression.escapedPattern(for: value.lowercased())
-  let instruction = metadataInstructionText(request)
-  guard
-    instruction.range(
-      of: #"(?:\b(?:in|into|to|en|auf|em|en langue|in lingua)\s+"# + escaped
-        + #"\b|\b"# + escaped + #"\s+(?:file)?names?\b)"#,
-      options: .regularExpression) != nil
-  else { return nil }
-  for code in ["en", "es", "fr", "de", "it", "pt"] {
+private let namingLanguageAliases: [String: String] = {
+  var aliases: [String: String] = [:]
+  // Recognize other named languages too: limited descriptor support must not silently
+  // turn an unsupported requested language into permission to use the source language.
+  for code in Locale.LanguageCode.isoLanguageCodes {
     for locale in ["en", "es", "fr", "de", "it", "pt"] {
-      if Locale(identifier: locale).localizedString(forLanguageCode: code)?.lowercased()
-        == value.lowercased()
-      {
-        return code
+      if let name = Locale(identifier: locale).localizedString(forLanguageCode: code.identifier) {
+        aliases[name.lowercased()] = code.identifier
       }
     }
   }
-  return nil
+  return aliases
+}()
+
+func explicitNamingLanguages(in request: String) -> Set<String> {
+  let lower = request.lowercased()
+  return Set(
+    namingLanguageAliases.compactMap { name, code in
+      namingLanguageMention(name, request: lower) ? code : nil
+    })
+}
+
+func requestedNamingLanguage(_ value: String, request: String) -> String? {
+  guard !value.isEmpty, request.contains(value),
+    namingLanguageMention(value.lowercased(), request: request.lowercased()),
+    let code = namingLanguageAliases[value.lowercased()],
+    ["en", "es", "fr", "de", "it", "pt"].contains(code)
+  else { return nil }
+  return code
+}
+
+private func namingLanguageMention(_ value: String, request: String) -> Bool {
+  guard request.contains(value) else { return false }
+  let escaped = NSRegularExpression.escapedPattern(for: value)
+  let instruction = metadataInstructionText(request)
+  return instruction.range(
+    of: #"(?:\b(?:in|into|to|en|auf|em|en langue|in lingua)\s+"# + escaped
+      + #"\b|\b"# + escaped + #"\s+(?:file\s*)?names?\b)"#,
+    options: .regularExpression) != nil
 }

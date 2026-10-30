@@ -133,6 +133,14 @@ final class WorkspaceModel {
             "Open Settings to finish setup or check the installed model offline. No files changed.")
         return
       }
+      // A corrected or repeated request is a new attempt, not the previous file snapshot.
+      // Discard that snapshot first so failed restoration cannot authorize stale planning.
+      self.inventory = nil
+      guard let inventory = try await self.coordinator.restoreFolder() else {
+        throw FolderAccessError.savedGrantUnavailable
+      }
+      self.inventory = inventory
+      try Task.checkCancellation()
       switch try await self.coordinator.planTask(request: submitted, model: self.completion) {
       case .clarification(let question):
         self.feedback = WorkspaceFeedback(

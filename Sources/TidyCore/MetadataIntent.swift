@@ -14,7 +14,9 @@ enum IntentViolation: String, Error {
   case renameEvidence =
     "A rename rule's evidence must be copied from a clause whose effect includes rename. Copy the complete positive action clause verbatim, not a paraphrase or a fragment from another clause. Preserve quoted literals exactly."
   case renameSeparator =
-    "A separator rule needs the requested replacement verb and BOTH source/target separators in its evidence. from/value are literal space, underscore or hyphen characters, not words."
+    "A separator rule must bind the requested direction: replace/change SOURCE with/to TARGET, substitute TARGET for SOURCE, or use TARGET instead of SOURCE. from/value are literal space, underscore or hyphen characters, not words. Do not reverse or guess an ambiguous direction."
+  case namingLanguage =
+    "A content naming rule must copy the explicitly requested output language into value; never omit it or substitute another language. If multiple output languages are requested, ask for clarification."
   case renameCase =
     "A case rule needs the explicit requested lowercase/uppercase/title-case phrase in its evidence, with value and from both empty."
   case renameLiteral =
@@ -185,17 +187,17 @@ struct MetadataIntent: Decodable {
         else {
           throw IntentViolation.rename
         }
+        let requestedLanguages = explicitNamingLanguages(in: request)
+        guard
+          requestedLanguages.isEmpty
+            ? rule.value.isEmpty
+            : requestedLanguages
+              == Set([requestedNamingLanguage(rule.value, request: request)].compactMap { $0 })
+        else { throw IntentViolation.namingLanguage }
       case "separator":
         guard [" ", "_", "-"].contains(rule.from), [" ", "_", "-"].contains(rule.value),
           rule.from != rule.value,
-          containsWord(
-            words,
-            [
-              "replace", "replacing", "change", "changing", "use", "using", "swap", "separators",
-              "separator", "normalize", "substitute",
-            ]),
-          separatorMention(rule.from, in: rule.evidence.lowercased()),
-          separatorMention(rule.value, in: rule.evidence.lowercased())
+          requestedSeparatorChange(from: rule.from, to: rule.value, in: rule.evidence)
         else { throw IntentViolation.renameSeparator }
       case "lowercase", "uppercase", "titlecase":
         let terms =
@@ -500,13 +502,48 @@ private func quotedLiteral(_ value: String, in text: String) -> Bool {
   ["\"\(value)\"", "‘\(value)’", "'\(value)'", "“\(value)”"].contains(where: text.contains)
 }
 
-private func separatorMention(_ value: String, in text: String) -> Bool {
-  switch value {
-  case " ": containsWord(text, ["space", "spaces", "whitespace"]) || quotedLiteral(value, in: text)
-  case "_": containsWord(text, ["underscore", "underscores"]) || quotedLiteral(value, in: text)
-  case "-":
-    containsWord(text, ["hyphen", "hyphens", "dash", "dashes"]) || quotedLiteral(value, in: text)
-  default: false
+private func requestedSeparatorChange(from: String, to: String, in evidence: String) -> Bool {
+  func operand(_ value: String) -> String {
+    let word: String
+    switch value {
+    case " ": word = #"\b(?:spaces?|whitespace)\b"#
+    case "_": word = #"\bunderscores?\b"#
+    default: word = #"\b(?:hyphens?|dashes)\b"#
+    }
+    let literal = NSRegularExpression.escapedPattern(for: value)
+    return "(?:" + word + #"|[\"“‘']"# + literal + #"[\"”’'])"#
+  }
+  let source = operand(from)
+  let target = operand(to)
+  guard
+    let quoted = try? NSRegularExpression(
+      pattern: #"[\"“][^\"”]*[\"”]|‘[^’]*’|(?<!\w)'[^']*'(?!\w)"#)
+  else { return false }
+  var instruction = evidence
+  for match in quoted.matches(in: evidence, range: NSRange(evidence.startIndex..., in: evidence))
+    .reversed()
+  {
+    guard let range = Range(match.range, in: instruction) else { continue }
+    let text = String(instruction[range])
+    if ![" ", "_", "-"].contains(String(text.dropFirst().dropLast())) {
+      instruction.replaceSubrange(range, with: " ")
+    }
+  }
+  // Mere mentions of both separators do not authorize their direction. Ambiguous
+  // phrasing stays invalid rather than letting model parameters choose the operation.
+  let patterns = [
+    #"\b(?:replace|replacing|change|changing)\s+"#
+      + source + #"\s+(?:with|to|into)\s+"# + target,
+    #"\b(?:swap|swapping)\s+"# + source + #"\s+(?:with|for)\s+"# + target,
+    #"\b(?:substitute|substituting)\s+"# + source + #"\s+with\s+"# + target,
+    #"\b(?:change|changing|normalize|normalizing)\s+(?:separators?\s+)?from\s+"#
+      + source + #"\s+to\s+"# + target,
+    #"\b(?:substitute|substituting)\s+"# + target + #"\s+for\s+"# + source,
+    #"\b(?:use|using)\s+"# + target + #"\s+(?:instead\s+of|in\s+place\s+of|rather\s+than)\s+"#
+      + source,
+  ]
+  return patterns.contains {
+    instruction.range(of: $0, options: [.regularExpression, .caseInsensitive]) != nil
   }
 }
 

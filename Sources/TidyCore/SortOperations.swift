@@ -176,6 +176,10 @@ extension TaskCoordinator {
     _ operationID: UUID, root: ScopedDirectory, journal: OperationJournal,
     entries: inout [FileOperation]
   ) throws {
+    var rootInfo = stat()
+    guard lstat(root.url.path, &rootInfo) == 0, FileIdentity(rootInfo) == root.identity else {
+      throw SortError.uncertainIdentity
+    }
     guard let index = entries.firstIndex(where: { $0.id == operationID }),
       entries[index].rootIdentity == root.identity
     else { throw SortError.uncertainIdentity }
@@ -216,6 +220,9 @@ extension TaskCoordinator {
     entries[index] = entry
     try journal.save(entries)
     try operationCheckpoint(.undoIntentSaved)
+    guard lstat(root.url.path, &rootInfo) == 0, FileIdentity(rootInfo) == root.identity else {
+      throw SortError.uncertainIdentity
+    }
     try validateAncestors(root.fd, entry.ancestorIdentities)
     guard
       entryInfo(root.fd, entry.destinationFolder).map(FileIdentity.init)
@@ -243,6 +250,10 @@ extension TaskCoordinator {
   }
 
   private func cleanupFolder(_ entry: FileOperation, root: ScopedDirectory) {
+    var rootInfo = stat()
+    guard lstat(root.url.path, &rootInfo) == 0, FileIdentity(rootInfo) == root.identity else {
+      return
+    }
     if let created = entry.createdFolder,
       let current = entryInfo(root.fd, entry.destinationFolder), FileIdentity(current) == created
     {

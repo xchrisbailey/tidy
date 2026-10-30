@@ -371,6 +371,89 @@ struct MetadataIntentTests {
     #expect(try await coordinator.execute(plan).changed.count == 1)
   }
 
+  @Test(arguments: [
+    "Replace underscores with hyphens in filenames",
+    "Change underscores to hyphens in filenames",
+    "Use hyphens instead of underscores in filenames",
+    "Substitute hyphens for underscores in filenames",
+    "Substitute underscores with hyphens in filenames",
+    "Replace '_' with '-' in filenames",
+  ])
+  func reversedSeparatorRuleRequiresCorrectionBeforeExpansion(request: String) async throws {
+    let fixture = try LanguageFixture()
+    defer { fixture.remove() }
+    try fixture.write("Monthly-Report_Archive.txt")
+    let coordinator = TaskCoordinator(bookmarkFile: fixture.bookmark)
+    _ = try await coordinator.selectFolderForWriting(fixture.folder)
+    let reversed = try metadataResponse(
+      request: request, sort: "none", rename: [separatorRule(evidence: request, from: "-", to: "_")]
+    )
+    let corrected = try metadataResponse(
+      request: request, sort: "none", rename: [separatorRule(evidence: request, from: "_", to: "-")]
+    )
+    let responses = ResponseSequence([reversed, corrected])
+    let outcome = try await coordinator.planTask(request: request) { _, _, _ in
+      await responses.next()
+    }
+    guard case .plan(let plan) = outcome else {
+      Issue.record("Expected corrected separator direction")
+      return
+    }
+    #expect(try await coordinator.undoHistory().isEmpty)
+    let result = try await coordinator.execute(plan)
+    #expect(result.changed.first?.destinationName == "Monthly-Report-Archive.txt")
+    #expect(
+      try Data(contentsOf: fixture.folder.appendingPathComponent("Monthly-Report-Archive.txt"))
+        == Data("fixture".utf8))
+  }
+
+  @Test(arguments: [
+    "Sort by type and translate document contents into French",
+    "Sort by type and translate the reports into French",
+    "Sort by type and translate filenames and document contents into French",
+    "Sort by type and translate filenames into English and document contents into French",
+  ])
+  func mixedContentTranslationCannotHideInsideSupportedClause(request: String) async throws {
+    let fixture = try LanguageFixture()
+    defer { fixture.remove() }
+    try fixture.write("Report.txt")
+    let coordinator = TaskCoordinator(bookmarkFile: fixture.bookmark)
+    _ = try await coordinator.selectFolderForWriting(fixture.folder)
+    let misleading = try metadataResponse(request: request)
+    let outcome = try await coordinator.planTask(request: request, model: { _, _, _ in misleading })
+    guard case .unsupported(let reason) = outcome else {
+      Issue.record("The entire mixed request must be refused")
+      return
+    }
+    #expect(reason.contains("entire request"))
+    #expect(try await coordinator.undoHistory().isEmpty)
+    #expect(
+      try FileManager.default.contentsOfDirectory(atPath: fixture.folder.path) == ["Report.txt"])
+  }
+
+  @Test(arguments: [
+    "Normalize underscores and hyphens in filenames",
+    "Prepend 'replace underscores with hyphens' to filenames",
+  ])
+  func ambiguousOrQuotedSeparatorActionCannotAuthorizeDirection(request: String) async throws {
+    let fixture = try LanguageFixture()
+    defer { fixture.remove() }
+    try fixture.write("Monthly_Report.txt")
+    let coordinator = TaskCoordinator(bookmarkFile: fixture.bookmark)
+    _ = try await coordinator.selectFolderForWriting(fixture.folder)
+    let guessed = try metadataResponse(
+      request: request, sort: "none", rename: [separatorRule(evidence: request, from: "_", to: "-")]
+    )
+    await #expect(throws: PlanningError.invalidResponse) {
+      try await coordinator.planTask(request: request, model: { _, _, _ in guessed })
+    }
+    #expect(try await coordinator.undoHistory().isEmpty)
+    #expect(
+      try FileManager.default.contentsOfDirectory(atPath: fixture.folder.path) == [
+        "Monthly_Report.txt"
+      ])
+  }
+
   @Test func separatorRulePreservesNonISODateAndSeparatedIdentifier() async throws {
     let fixture = try LanguageFixture()
     defer { fixture.remove() }
@@ -533,7 +616,7 @@ struct MetadataIntentTests {
           ["kind": "prefix", "evidence": "Prepend 'ID ' to names", "value": "ID ", "from": ""]
         ])
     default:
-      request = "Sort by type and translate the reports into French"
+      request = "Sort by type and rotate the reports"
       response = try metadataResponse(request: "Sort by type")
     }
     let replies = ResponseSequence([response])

@@ -154,20 +154,35 @@ extension TaskCoordinator {
       )
       .replacingOccurrences(
         of:
-          #"\b(?:do not|don't|never|without)\s+(?:ever\s+)?(?:delete|deleting|erase|trash|upload|email|send|download|compress|encrypt|decrypt|execute|copy|summarize|read(?:ing)?\s+(?:file\s+)?contents)\b"#,
+          #"\b(?:do not|don't|never|without)\s+(?:ever\s+)?(?:delete|deleting|erase|trash|upload|email|send|download|compress|encrypt|decrypt|execute|copy|summarize|translate|translating|read(?:ing)?\s+(?:file\s+)?contents)\b"#,
         with: "", options: .regularExpression
       )
       .replacingOccurrences(
         of:
           #"\b(?:keep|leave|preserve|retain)\s+(?:all\s+)?(?:file\s+)?contents(?:\s+unchanged)?\b"#,
         with: "", options: .regularExpression)
-    return containsWord(
-      unquoted,
-      [
-        "delete", "deleting", "erase", "trash", "upload", "email", "send", "download", "compress",
-        "encrypt", "decrypt",
-        "summarize", "deduplicate", "dedup", "copy", "copies",
-      ])
+    // Translation of filenames can be a naming instruction; translation of documents
+    // cannot disappear inside a model-declared sorting clause.
+    let translations = unquoted.matches(of: /\btranslat(?:e|ing)\b([^,;.!?]*)/)
+    let translatesContents = translations.contains { match in
+      let object = String(match.output.1).trimmingCharacters(in: .whitespaces)
+        .replacingOccurrences(
+          of: #"^(?:(?:the|these|all|my)\s+)+"#, with: "", options: .regularExpression
+        )
+        .replacingOccurrences(
+          of: #"\b(?:based\s+on|from|using)\s+(?:(?:their|the|file|document)\s+)*contents?\b"#,
+          with: "", options: .regularExpression)
+      return object.range(of: #"^(?:file\s*names?|names?)\b"#, options: .regularExpression) == nil
+        || containsWord(object, ["contents", "content", "documents", "reports"])
+    }
+    return translatesContents
+      || containsWord(
+        unquoted,
+        [
+          "delete", "deleting", "erase", "trash", "upload", "email", "send", "download", "compress",
+          "encrypt", "decrypt",
+          "summarize", "deduplicate", "dedup", "copy", "copies",
+        ])
       || unquoted.range(of: #"\b"# + duplicateAction + #"\b"#, options: .regularExpression) != nil
       || unquoted.range(
         of:
