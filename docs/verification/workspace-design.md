@@ -52,7 +52,7 @@ installed app's files, downloads model weights, or supplies a release authorizat
 bypass. No production launch-argument test mode was added.
 
 ```sh
-swift test --disable-automatic-resolution --filter 'WorkspaceModelTests|SettingsLifecycleTests|WorkspaceGeometryTests'
+swift test --disable-automatic-resolution --filter TidyAppTests
 bash scripts/release-tests.sh
 bash scripts/lint.sh
 shellcheck scripts/release-tests.sh
@@ -65,7 +65,7 @@ runs the complete signed/contained optimized coordinator suite, model/worker sui
 and the workspace suite. No inspection failures are hidden by skipping cases or
 loosening the production parser sandbox.
 
-Observed results before final handoff:
+Initial implementation results (before the follow-up usability pass below):
 
 | Check | Result |
 | --- | --- |
@@ -143,7 +143,8 @@ requests/errors, History selection/recovery details, Settings, and Help discover
 Task invocation stays explicit and changes files immediately; table selection and
 filtering do not narrow its scope.
 
-Full-window visual approval, VoiceOver/keyboard-only operation, Reduce Motion,
+The owner approved the production visual direction after opening the development
+build. Complete state-by-state visual review, VoiceOver/keyboard-only operation, Reduce Motion,
 Reduce Transparency, Increase Contrast and older-OS runtime checks remain pending.
 The source uses native controls/materials and keeps the macOS 14 deployment target;
 this is not a hardware/OS qualification or a claim that Liquid Glass behavior has
@@ -158,3 +159,74 @@ No installed app or preserved notarized DMG was replaced. No new notarization,
 GitHub push, public release, or App Store submission was performed. The issue stays
 open for the owner's morning review. Earlier owner-deferred formal checks were
 not reintroduced as required manual wizard reruns.
+
+## Follow-up usability pass
+
+After the owner approved the production layout, they authorized a focused usability
+pass before merging. That pass found a reproducible issue: a long failure message
+with no batch result had no scroll surface in the fixed-height Details sheet. The
+native regression failed before the correction. Summary text, refresh warnings and
+per-file outcomes now share one native scrolling List, with Done kept outside it.
+Refresh-only failures also expose Details and pass their complete warning text to
+the sheet, rather than relying on a two-line label/tooltip.
+
+Additional accessibility semantics identify the sidebar's readiness control as
+Local Model Settings with a readiness value, distinguish Cancel Undo from Cancel
+Task, announce concrete progress counts, and hide the decorative welcome icon.
+These are implementation improvements, not a claim of a completed VoiceOver audit.
+
+Current automated usability coverage:
+
+- Long error and refresh-warning-only Details sheets have a native scrollable
+  document and a Done button inside the window.
+- A real native text editor accepts first-responder focus and editing updates the
+  request binding without starting a task.
+- The actual workspace fits at default/minimum sizes with long directory paths,
+  long filenames and a multiline request. The full filename remains in inventory.
+- Geometry passes in Aqua, Dark Aqua, Accessibility High Contrast Aqua and
+  Accessibility High Contrast Dark Aqua: four native appearances at two sizes.
+- The module-wide `TidyAppTests` filter includes all four workspace suites, including
+  the new usability regressions. Debug and optimized runs pass all 16 test functions
+  (with additional parameterized cases). The complete optimized release-script pass
+  also reports 117 coordinator, 13 model and 2 worker tests passing. Local evidence:
+  `.build/workspace-usability-pass.log` and `.build/workspace-usability-release-tests.log`.
+
+No user system settings were changed. SwiftUI's Reduce Motion/Reduce Transparency
+environment values are read-only here, so tests do not fake overrides or treat
+native appearance selection as equivalent to exercising those system settings.
+Actual VoiceOver announcements, Tab/Shift-Tab navigation, command shortcuts, live
+composited glass and system reduced-effects behavior remain operator checks.
+
+Independent Standards and Spec reviewers checked `ae59f51...8b7dfe0`. Neither found
+new concrete correctness, safety or spec issues. Both confirmed that the disclosed
+manual gaps must not be counted as completed QA.
+
+A fresh ad-hoc-signed review app was packaged at
+`.build/usability-review-p2fjgprt/Tidy.app`, with `.build/Tidy-Usability.app` as its
+local shortcut. It uses the same build/resource/signing recipe as the development
+app, in a fresh directory to avoid overwriting the possibly running previous review
+build. Deep/strict signature checks and all icon representations pass; app ID and
+macOS target are unchanged and no test-framework linkage is present. No app was
+launched by packaging. The earlier `.build/Tidy.app`, installed app and notarized
+DMG were not replaced.
+
+Quit running Tidy, then open the updated review build from this worktree:
+
+```sh
+open .build/Tidy-Usability.app
+```
+
+Remaining operator checks before merge:
+
+1. With a disposable folder, use Tab/Shift-Tab and the documented shortcuts to
+   reach navigation, the request field, settings, task/cancel controls and Details.
+2. Use VoiceOver to review names, roles, progress counts, error details and recovery
+   controls. Check the Ready control identifies Local Model Settings rather than
+   announcing only an unexplained status.
+3. In system Accessibility display settings, exercise Reduce Motion, Reduce
+   Transparency and Increase Contrast, verifying live text/control legibility and
+   composited toolbar/sidebar behavior. Native appearance tests are not this check.
+
+**Merge is held** until the remaining operator checks pass or the owner explicitly
+decides how to track/defer them. The focused pass does not silently close #17 or
+authorize notarization or release publication.
