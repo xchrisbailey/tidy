@@ -9,6 +9,19 @@ require confirmation. Persistent undo is best-effort, not a backup.
 agent-scored quality/performance passes are not independent human, hardware or
 safety qualification. See [qualification evidence](docs/verification/ticket-15.md).
 
+## Workspace
+
+Organize puts files first, with a task composer below the inventory and native
+toolbar actions above it. History is the second sidebar destination. Model setup
+and storage live in Settings (Command-comma); private diagnostics remain under Help.
+Switching destinations does not cancel work. Downloads continue when Settings closes;
+use the explicit Pause/Cancel controls. Closing the workspace requests cancellation
+of file work and keeps completed changes available for best-effort undo.
+
+The owner-approved Workspace A redesign is tracked in #17. See its
+[implementation and review record](docs/verification/workspace-design.md) for the
+checks run and the visual/accessibility work still requiring operator review.
+
 ## Local development
 
 Use Apple silicon with Xcode 27.1 / Swift 6.4 including `swift format`. The build
@@ -65,9 +78,23 @@ See the [verification records](docs/verification/) for evidence and limitations.
 
 `scripts/release-tests.sh` runs the same complete optimized coordinator suite in a
 signed application test host with production XPC/parser containment, then the full
-optimized model/supervisor suites. Unbundled `swift test -c release` still fails
-native inspection cases; that failure is not relabeled a pass. Hosted serial
+optimized model/supervisor suites and workspace state/native lifecycle checks.
+Test-only app imports require `-enable-testing` in that script's test-build stage;
+the staged production service/parser are built first without it. Unbundled
+`swift test -c release` is not a substitute: internal app imports need testability,
+and native inspection cases need the packaged parser service. Those failures are
+not relabeled a pass. Hosted serial
 coverage and the failed parallel stress attempt are recorded separately.
+
+The workspace suites can also run without a model download:
+
+```sh
+swift test --disable-automatic-resolution --filter 'WorkspaceModelTests|SettingsLifecycleTests|WorkspaceGeometryTests'
+```
+
+They use temporary file fixtures and injected local completions. Native geometry
+checks cover default/minimum windows in light/dark appearances, not full VoiceOver,
+system-accessibility, live Liquid Glass, or older-macOS qualification.
 
 Real-provider tests skip unless separately authorized disposable fixture paths
 are supplied. Do not test personal sync data or read/evict placeholders to manufacture

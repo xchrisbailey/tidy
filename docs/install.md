@@ -24,6 +24,8 @@ and explicit download consent, but no Hugging Face account or token.
 
 These steps must be verified on the **final notarized, qualified artifact** before
 publication. They are not completed acceptance checks for today's candidate.
+The workspace instructions below describe the redesigned source build. The
+preserved `b422b36` notarized DMG still has the earlier setup/storage/history windows.
 
 1. Obtain the DMG and its independently published SHA-256 from the future approved
    GitHub Releases/project-page link. Compare with `shasum -a 256 PATH.dmg`.
@@ -35,12 +37,16 @@ publication. They are not completed acceptance checks for today's candidate.
    Developer ID signature alone is not sufficient. If launch is blocked, **stop
    and record the failure; do not remove quarantine, disable Gatekeeper, or use an
    “Open Anyway” bypass as installation evidence.**
-4. Choose **Local Model Setup…**. Review the size and consent before Download / Resume.
+4. Open **Tidy → Settings…** (Command-comma), or choose **Set Up Model…** from the
+   workspace. Review download size, required storage and provider before consenting
+   and choosing Download Model or Resume Download.
    Readiness requires size/SHA-256 verification and local native inference, not just
    a completed transfer. Offline first-time setup without installed weights cannot
    work. There is no cloud/Apple built-in model fallback or supported manual import.
-5. Select a disposable local folder in the native picker, granting read/write
-   access only to that folder. Try a clear request such as “Sort by type.” Clear
+5. Use **Choose Folder…** in Organize to inspect a disposable local folder. Grant
+   write access separately through the toolbar's Folder Access menu; authorize only
+   the intended folder. Try a clear request such as “Sort by type” and choose
+   **Organize Files**. Table filters and selections do not narrow the task. Clear
    requests execute without preview; ambiguous requests ask for clarification.
    More than 100 changed files require confirmation of counts. Read skipped,
    abstained, failed and conflict explanations; do not repeatedly retry a busy or
@@ -61,11 +67,12 @@ use are additional. Storage is checked again before transfers, not guaranteed fo
 
 Pause retains verified files/resume data. Resume needs consent again and may restart
 the current file. Cancel and Remove Partials stops transfers before deleting
-partials; installed models remain. **Local Model Storage…** shows installed revision
+partials; installed models remain. **Settings → Model Storage** shows installed revision
 bytes, incomplete transfers and active status; Refresh Storage updates the view.
 Remove… confirms deletion; removing the active model disables tasks until another
 model is checked/installed. Replacement retains the working model until verification
 and native inference pass; old versions remain until explicitly removed.
+Closing Settings does not pause a transfer. Use its explicit Pause or Cancel controls.
 
 After setup, **Check Installed Model Offline** verifies an installed model without
 downloading. Tasks use that local model offline. Qualify a real task with networking
@@ -94,12 +101,16 @@ Local inference does not disable iCloud/Dropbox/other sync. Tidy skips detected
 cloud-only files rather than hydrating them; real-provider nonhydration remains an
 unverified gate. Do not infer qualification from local marker-file tests.
 
-Undo History keeps original/resulting paths and recovery information on this Mac,
+The **History** sidebar destination keeps original/resulting paths and recovery information on this Mac,
 not document excerpts, until **Clear History…**. The displayed recovery-record bytes
 exclude model storage, grants and lock bookkeeping. Clearing requires confirmation,
 permanently loses Tidy undo, does not reverse changes or touch user files, and keeps
 models and folder grants. Removing the app alone does not promise removal of its
 container/history/models. Decide on undo first and use the controls before uninstalling.
+Choose a task, then a file, to inspect its paths and recovery options. Task labels
+are derived from recorded folders; dates are unavailable in the existing journal.
+Navigation does not cancel a task or undo. Closing the workspace requests cancellation
+and keeps durable completed changes; organizing commands stay disabled until it reopens.
 
 Undo Task / Undo File is best-effort, not a backup. It needs the same identifiable
 file, available volume and original-folder write grant. Occupied original locations
