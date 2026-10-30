@@ -93,3 +93,19 @@ wizard library, shell/Python syntax, and isolated report-history controls were
 checked; no native retry was performed by the agent. This replacement is not
 notarized, and public release remains blocked until actual native results and
 the other existing gates pass.
+
+## Operator retry result
+
+The local retry completed on 2026-10-30 at 02:57 UTC (2026-10-29 local).
+The operator confirmed success in chat, and the retained native report records
+PASS for replacement launch, resumed model setup/readiness and storage visibility
+against `b422b36` and archive hash `40ee29c35ae67bdd35323efcb6ca8076c31f33b68ff46edf6855505ec8fd5dea`.
+The original `63f23b1` failures remain in attempt history. This clears the reported
+download/progress blocker for the tested setup, not every native acceptance gate
+or a fresh clean-user installation.
+
+The remaining folder-grant, task, cancellation, relaunch/undo, offline and private
+export checks have not yet been recorded in this run. Continue the existing local
+wizard with `--continue-native`; do not mark those checks passed from the three
+successful retry observations. Hardware qualification and public release remain
+blocked by their separate evidence requirements.
