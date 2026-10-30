@@ -10,6 +10,18 @@ No publishing/push/upload, notary submission, account/credential setup, new
 dependency, CI, cloud service or personal sync testing occurred. The primary
 worktree's dirty documents were not edited.
 
+## Proper-host optimized-suite follow-up
+
+The original seven-function unbundled release failure below remains failed history,
+not a pass. A subsequent [full optimized application test host](ticket-16-hosted-tests.md)
+runs the **same unchanged 103 coordinator test functions**, with the production
+XPC service/parser in a signed `.app`, plus complete optimized model/supervisor
+suites: **115 non-skipped functions pass**, one provider skip. The host verifies
+complete matching discovery; missing-service controls fail. Production source,
+test assertions, parser isolation/deadlines and app entitlements are unchanged.
+The hosted suite is serial; a parallel deadline-failing attempt is retained and
+does not become concurrency qualification. All manual/release gates remain open.
+
 ## Artifact and signing
 
 Candidate source commit: `5e41cbc6ff4b` (implementation begins at `30b412e`).
