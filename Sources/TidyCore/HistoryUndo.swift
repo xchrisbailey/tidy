@@ -1,0 +1,75 @@
+import Foundation
+import Observation
+
+/// Owns a history window's undo lifetime without changing coordinator task authority.
+@Observable @MainActor
+public final class HistoryUndo {
+  public private(set) var isWorking = false
+  public private(set) var isCancelling = false
+  public private(set) var message: String?
+  public private(set) var progress: UndoProgress?
+  private var operation: Task<Void, Never>?
+
+  public init() {}
+
+  public func start(_ id: UUID, fileOnly: Bool, coordinator: TaskCoordinator) {
+    guard !isWorking else { return }
+    isWorking = true
+    isCancelling = false
+    progress = nil
+    message = "Checking retained undo records…"
+    operation = Task {
+      defer {
+        isWorking = false
+        isCancelling = false
+        operation = nil
+      }
+      var selected: [FileOperation] = []
+      var outcome = "Undo finished"
+      do {
+        selected = try await coordinator.historySnapshot().operations.filter {
+          fileOnly ? $0.id == id : $0.taskID == id
+        }
+        message =
+          "Undoing \(selected.count) recorded files. Completed reversals are kept if cancelled."
+        if fileOnly {
+          try await coordinator.undoFile(id)
+        } else {
+          try await coordinator.undoTask(id) { progress in
+            await self.update(progress)
+          }
+        }
+      } catch is CancellationError {
+        outcome = "Undo cancelled"
+      } catch {
+        outcome = "Undo stopped: \(error.localizedDescription)"
+      }
+      do {
+        let ids = Set(selected.map(\.id))
+        let history = try await coordinator.historySnapshot()
+        let undone = history.operations.filter { ids.contains($0.id) && $0.state == .undone }.count
+        message =
+          "\(outcome). \(undone) of \(ids.count) recorded files undone. Completed reversals were not rolled back; check each file's status."
+      } catch {
+        message =
+          "\(outcome). Status could not be refreshed; reopen history to check partial outcomes."
+      }
+    }
+  }
+
+  private func update(_ progress: UndoProgress) {
+    self.progress = progress
+    message =
+      "\(progress.processed) of \(progress.total) recorded files checked · \(progress.undone) undone. Completed reversals are kept if cancelled."
+  }
+
+  public func cancel() {
+    guard isWorking else { return }
+    isCancelling = true
+    operation?.cancel()
+  }
+
+  public func waitUntilFinished() async {
+    await operation?.value
+  }
+}
