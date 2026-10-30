@@ -1,9 +1,29 @@
-# Direct distribution: blocked prerequisites and operator procedure
+# Direct distribution: experimental beta and stable-release prerequisites
 
-**PUBLIC RELEASE BLOCKED. No hardware qualified.** #16 supplies local candidate
-packaging, not a public release. #15's corrected synthetic agent-scored quality
-and 100-file passes are not independent human/hardware/safety qualification.
-Keep both issues and parent #1 open. Packaging scripts do not upload or publish.
+**Stable v1 remains blocked; no hardware is formally qualified.** The owner selected
+an experimental beta, explicitly deferring unresolved qualification rather than
+claiming it passed, and selected MIT for Tidy's source. The current beta is not
+published. Its exact artifact, Apple submission, final install disposition and
+working-name risk still require approval. See [beta decisions](releases/v0.1.0-beta.1.md).
+Synthetic agent-scored quality and 100-file passes are not independent
+human/hardware/safety qualification. Packaging scripts do not upload or publish.
+
+## Experimental beta preparation
+
+`package-candidate.sh --experimental-beta` builds a fresh, traceable **Tidy Beta.app**
+with the approved workspace/icon, project MIT license and third-party notices.
+`package-dmg.sh --experimental-beta` accepts only that beta archive's root and
+provenance, preserving its signed app unchanged. Neither mode promotes or relabels
+an older unqualified artifact. `test-package-dmg.py ARCHIVE --experimental-beta`
+checks unsafe archive rejection, cross-mode rejection, the mounted read-only image,
+warnings/licenses and every signed app file/link. The manifest keeps
+`publicReleaseApproved: false` until a separate approval is recorded.
+
+#18 is explicitly post-release work by owner decision; it is not a beta gate and
+is not passed. #15 retains unverified qualification as disclosed limitations.
+Stable promotion via `package-release.sh` remains blocked. Earlier sections and
+historical receipts below describe unqualified candidates, not the new beta's
+notarization or publishing approval.
 
 ## Current distribution decision
 

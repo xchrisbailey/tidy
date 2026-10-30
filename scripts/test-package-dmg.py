@@ -24,6 +24,12 @@ def sha256(path):
 def main():
     repo = Path(__file__).resolve().parent.parent
     archive = Path(sys.argv[1]).resolve(strict=True)
+    mode = sys.argv[2] if len(sys.argv) == 3 else "--unqualified"
+    assert mode in {"--unqualified", "--experimental-beta"}
+    beta = mode == "--experimental-beta"
+    flavor = "experimental-beta" if beta else "unqualified"
+    payload_name = "Tidy-Experimental-Beta" if beta else "Tidy-Unqualified-Development"
+    app_name = "Tidy Beta.app" if beta else "Tidy Unqualified Development.app"
     before = sha256(archive)
     scratch = Path(tempfile.mkdtemp(
         prefix="tidy-dmg-test-",
@@ -37,30 +43,37 @@ def main():
         with zipfile.ZipFile(bad, "w") as source:
             source.writestr(name, "Unsafe fixture")
         rejected = subprocess.run(
-            ["bash", str(repo / "scripts/package-dmg.sh"), "--unqualified", str(bad)],
+            ["bash", str(repo / "scripts/package-dmg.sh"), mode, str(bad)],
             cwd=repo, capture_output=True, text=True, timeout=30)
         assert rejected.returncode != 0 and "Unsafe or unexpected archive path" in rejected.stderr
         assert not (scratch / "escape.txt").exists()
     with zipfile.ZipFile(bad, "w") as source:
-        link = zipfile.ZipInfo("Tidy-Unqualified-Development/escape")
+        link = zipfile.ZipInfo(payload_name + "/escape")
         link.create_system = 3
         link.external_attr = (stat.S_IFLNK | 0o777) << 16
         source.writestr(link, "/Applications")
     rejected = subprocess.run(
-        ["bash", str(repo / "scripts/package-dmg.sh"), "--unqualified", str(bad)],
+        ["bash", str(repo / "scripts/package-dmg.sh"), mode, str(bad)],
         cwd=repo, capture_output=True, text=True, timeout=30)
     assert rejected.returncode != 0 and "Escaping archive symlink" in rejected.stderr
+    other_mode = "--unqualified" if beta else "--experimental-beta"
+    rejected = subprocess.run(
+        ["bash", str(repo / "scripts/package-dmg.sh"), other_mode, str(archive)],
+        cwd=repo, capture_output=True, text=True, timeout=30)
+    assert rejected.returncode != 0, "Packaging modes must not relabel each other's archives"
     result = subprocess.run(
-        ["bash", str(repo / "scripts/package-dmg.sh"), "--unqualified", str(archive)],
+        ["bash", str(repo / "scripts/package-dmg.sh"), mode, str(archive)],
         cwd=repo, capture_output=True, text=True, timeout=300)
     assert result.returncode == 0, result.stdout + result.stderr
-    output = next(line.removeprefix("Local unqualified DMG: ")
-                  for line in result.stdout.splitlines() if line.startswith("Local unqualified DMG: "))
+    prefix = f"Local {flavor} DMG: "
+    output = next(line.removeprefix(prefix)
+                  for line in result.stdout.splitlines() if line.startswith(prefix))
     directory = Path(output).resolve(strict=True)
     assert directory.is_relative_to(repo / ".build/direct-download")
     manifest = json.loads((directory / "DMG_BUILD.json").read_text())
     assert manifest["sourceArchiveSHA256"] == before
     assert manifest["publicReleaseApproved"] is False
+    assert manifest["packagingFlavor"] == flavor
     image = directory / manifest["imageName"]
     assert image.suffix == ".dmg" and sha256(archive) == before
     image_info = plistlib.loads(subprocess.check_output(["hdiutil", "imageinfo", "-plist", str(image)]))
@@ -80,11 +93,14 @@ def main():
         attached = True
         assert (mount / "Applications").is_symlink()
         assert os.readlink(mount / "Applications") == "/Applications"
-        assert "Unqualified" in (mount / "README.txt").read_text()
-        app = mount / "Tidy Unqualified Development.app"
+        assert "no hardware is formally qualified" in (mount / "README.txt").read_text()
+        if beta:
+            assert (mount / "LICENSE.txt").read_bytes() == (repo / "LICENSE").read_bytes()
+            assert "experimental beta" in (mount / "BETA-NOTES.md").read_text().lower()
+        app = mount / app_name
         subprocess.run(["codesign", "--verify", "--deep", "--strict", str(app)],
                        check=True, capture_output=True)
-        prefix = "Tidy-Unqualified-Development/Tidy Unqualified Development.app/"
+        prefix = payload_name + "/" + app_name + "/"
         expected = set()
         with zipfile.ZipFile(archive) as source:
             for entry in source.infolist():

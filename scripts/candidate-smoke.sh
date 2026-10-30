@@ -1,12 +1,16 @@
 #!/bin/bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
-if [[ "$#" != 1 || ! -d "$1/Tidy-Unqualified-Development/Tidy Unqualified Development.app" ]]; then
-  echo 'Usage: bash scripts/candidate-smoke.sh /absolute/path/to/unqualified-output-directory' >&2
+if [[ "$#" != 1 ]]; then
+  echo 'Usage: bash scripts/candidate-smoke.sh /absolute/path/to/candidate-output-directory' >&2
   exit 2
 fi
 out="$(cd "$1" && pwd)"
 candidate="$out/Tidy-Unqualified-Development/Tidy Unqualified Development.app"
+if [[ -d "$out/Tidy-Experimental-Beta/Tidy Beta.app" ]]; then
+  candidate="$out/Tidy-Experimental-Beta/Tidy Beta.app"
+fi
+test -d "$candidate"
 identity="${TIDY_SIGN_IDENTITY:-DDB64DD6A0BB35AA612980AEDD27B781C6A1E6F0}"
 bin_path="$(swift build --configuration release --arch arm64 --show-bin-path)"
 app="$out/Tidy Unqualified Diagnostic.app"

@@ -5,9 +5,14 @@ folder; local inference prepares a validated plan. Clear requests execute withou
 preview, ambiguous requests need clarification, and changes to more than 100 files
 require confirmation. Persistent undo is best-effort, not a backup.
 
-**PUBLIC RELEASE BLOCKED. Supported hardware: NONE qualified.** Corrected synthetic
-agent-scored quality/performance passes are not independent human, hardware or
-safety qualification. See [qualification evidence](docs/verification/ticket-15.md).
+**Experimental beta preparation; no public app download yet.** No hardware is
+formally qualified. The owner selected an experimental beta rather than a qualified
+v1, with unresolved checks disclosed instead of marked passed. See the
+[beta decisions and limitations](docs/releases/v0.1.0-beta.1.md) and
+[qualification evidence](docs/verification/ticket-15.md).
+
+Tidy's source is [MIT licensed](LICENSE). Bundled dependencies and the separately
+downloaded model retain their own licenses and notices.
 
 ## Workspace
 
@@ -54,18 +59,22 @@ files are skipped, not hydrated; real-provider nonhydration qualification is ope
 - [Local #16 build/signing/verification record](docs/verification/ticket-16.md)
 - [Signed, notarized and stapled direct-download DMG evidence](docs/verification/dmg-distribution.md)
 
-Local optimized Developer ID candidate packaging is explicit and unqualified:
+Local optimized Developer ID candidate packaging is explicit:
 
 ```sh
 bash scripts/package-candidate.sh --unqualified
 bash scripts/package-dmg.sh --unqualified /path/to/signed-candidate.zip
+# Experimental beta preparation (not approval to publish):
+bash scripts/package-candidate.sh --experimental-beta
+python3 scripts/test-package-dmg.py /path/to/beta-candidate.zip --experimental-beta
 ```
 
 Building the app candidate requires clean committed source and authorized signing
 access; DMG packaging reuses an already signed candidate. These scripts never
 upload, notarize or publish. The owner-authorized candidate DMG notarization is
-recorded separately. Public promotion remains fail-closed pending owner review of
-the final artifact, accurate qualification claims and remaining distribution gates.
+recorded separately. Stable v1 promotion remains fail-closed. Experimental beta
+packaging preserves the unqualified status and requires separate owner approval
+of the exact final artifact before Apple submission or public publication.
 This release targets DMG downloads through GitHub; any App Store release is later work.
 
 ## Verification boundaries

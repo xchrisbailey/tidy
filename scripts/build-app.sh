@@ -14,6 +14,7 @@ while IFS= read -r -d '' bundle; do
   cp -R "$bundle" "$app/Contents/Resources/"
 done < <(find "$bin_path" -maxdepth 1 -type d -name '*.bundle' -print0)
 cp -R Packaging/Notices "$app/Contents/Resources/"
+cp LICENSE "$app/Contents/Resources/Tidy-LICENSE.txt"
 cp Packaging/Icons/Tidy.icns "$app/Contents/Resources/"
 if ! find "$app/Contents/Resources" -name '*.metallib' -print -quit | grep -q .; then
   echo "Missing MLX Metal resources. Build with the Xcode toolchain before packaging." >&2

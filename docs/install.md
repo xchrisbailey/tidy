@@ -1,9 +1,9 @@
-# Tidy: unqualified development installation and setup
+# Tidy: experimental installation and setup
 
-**PUBLIC RELEASE BLOCKED. Supported hardware: NONE qualified.** This guide is for
-local, disposable qualification only, not an invitation to download a public
-release. Signing does not establish safety or hardware support. #15 and #16 stay
-open. Use backed-up synthetic files, not your real Downloads/Desktop or sync data.
+**No public app download yet; no hardware is formally qualified.** The owner selected
+an experimental beta, not a qualified v1. See [beta limitations](releases/v0.1.0-beta.1.md).
+Signing/notarization does not establish safety or hardware support. Use disposable,
+backed-up test files, not your real Downloads/Desktop or personal sync data.
 
 ## Mac requirements and cost
 
@@ -22,8 +22,9 @@ and explicit download consent, but no Hugging Face account or token.
 
 ## Install a future approved direct download
 
-These steps must be verified on the **final notarized, qualified artifact** before
-publication. They are not completed acceptance checks for today's candidate.
+Record checks against the **exact final notarized artifact**, or an explicit owner
+disposition for an experimental beta. They are not completed acceptance checks for
+today's candidate and do not establish hardware qualification.
 The workspace instructions below describe the redesigned source build. The
 preserved `b422b36` notarized DMG still has the earlier setup/storage/history windows.
 
@@ -31,7 +32,8 @@ preserved `b422b36` notarized DMG still has the earlier setup/storage/history wi
    GitHub Releases/project-page link. Compare with `shasum -a 256 PATH.dmg`.
 2. Open the DMG in Finder, read its bundled warnings, then drag the app to Applications
    in a clean test user. Quit other Tidy builds first. The candidate has the explicit
-   name **Tidy Unqualified Development.app**; it is not a release.
+   name **Tidy Unqualified Development.app**; experimental beta packaging instead
+   uses **Tidy Beta.app**. Neither name implies hardware qualification.
 3. Open from Applications. Verify the expected identified developer and ordinary
    Gatekeeper behavior. Check the exact artifact's recorded notarization status; a
    Developer ID signature alone is not sufficient. If launch is blocked, **stop
