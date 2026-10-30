@@ -61,6 +61,7 @@ final class WorkspaceModel {
   private(set) var history: HistorySnapshot?
   private(set) var recovery: [RecoveryOperation] = []
   private(set) var accessDescription = "Folder access is checked before changes"
+  private(set) var windowIsOpen = false
   @ObservationIgnored private let modelIsReady: @MainActor () -> Bool
   @ObservationIgnored private let completion: PlanCompletion
   @ObservationIgnored private var operation: Task<Void, Never>?
@@ -82,7 +83,7 @@ final class WorkspaceModel {
     return messages.isEmpty ? nil : messages.joined(separator: "\n")
   }
   var canSubmit: Bool {
-    !isBusy && inventory != nil && modelIsReady()
+    windowIsOpen && !isBusy && inventory != nil && modelIsReady()
       && !request.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
   }
   var canCancel: Bool {
@@ -99,8 +100,8 @@ final class WorkspaceModel {
     guard !isBusy else { return }
     restored = true
     clearOutcome()
+    if let folder, folder != inventory?.folder { inventory = nil }
     start(.inspecting) {
-      self.inventory = nil
       if let folder {
         self.inventory =
           try await
@@ -118,7 +119,7 @@ final class WorkspaceModel {
   }
 
   func submit() {
-    guard !isBusy, inventory != nil,
+    guard windowIsOpen, !isBusy, inventory != nil,
       !request.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     else { return }
     let submitted = request
@@ -175,7 +176,10 @@ final class WorkspaceModel {
     if undoActivity.isWorking { undoActivity.cancel() } else { operation?.cancel() }
   }
 
+  func windowDidOpen() { windowIsOpen = true }
+
   func closeWindow() {
+    windowIsOpen = false
     if phase == .confirming { dismissPlan() } else { cancel() }
   }
 
@@ -247,10 +251,12 @@ final class WorkspaceModel {
   {
     guard operation == nil else { return }
     self.phase = phase
+    progress = nil
     operation = Task {
       do {
         try await action()
       } catch is CancellationError {
+        if phase == .inspecting { inventory = nil }
         feedback = WorkspaceFeedback(
           kind: .cancelled, title: "Stopped",
           detail:
@@ -258,6 +264,7 @@ final class WorkspaceModel {
         )
         if phase == .planning || phase == .executing { await reloadAfterChanges() }
       } catch {
+        if phase == .inspecting { inventory = nil }
         feedback = WorkspaceFeedback(
           kind: .failure, title: "Couldn’t finish", detail: error.localizedDescription)
         if phase == .planning || phase == .executing { await reloadAfterChanges() }

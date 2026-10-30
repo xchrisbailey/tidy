@@ -89,6 +89,7 @@ struct WorkspaceView: View {
       }
     }
     .frame(minWidth: 900, minHeight: 600)
+    .onAppear { model.windowDidOpen() }
     .task {
       model.restoreIfNeeded()
       await setup.restore()
@@ -247,20 +248,36 @@ enum FolderPicker {
 
 struct WorkspaceCommands: Commands {
   let model: WorkspaceModel
+  @Environment(\.openWindow) private var openWindow
 
   var body: some Commands {
     CommandGroup(replacing: .newItem) {
-      Button("Choose Folder…") { FolderPicker.choose(for: model) }
-        .keyboardShortcut("o").disabled(model.isBusy)
-      Button("Grant Write Access…") { FolderPicker.choose(for: model, forWriting: true) }
-        .disabled(model.isBusy)
+      Button("Choose Folder…") {
+        openWindow(id: "inventory")
+        FolderPicker.choose(for: model)
+      }
+      .keyboardShortcut("o").disabled(model.isBusy)
+      Button("Grant Write Access…") {
+        openWindow(id: "inventory")
+        FolderPicker.choose(for: model, forWriting: true)
+      }
+      .disabled(model.isBusy)
     }
     CommandGroup(after: .sidebar) {
-      Button("Organize") { model.destination = .organize }.keyboardShortcut("1")
-      Button("History") { model.destination = .history }.keyboardShortcut("2")
+      Button("Organize") {
+        model.destination = .organize
+        openWindow(id: "inventory")
+      }.keyboardShortcut("1")
+      Button("History") {
+        model.destination = .history
+        openWindow(id: "inventory")
+      }.keyboardShortcut("2")
     }
     CommandMenu("Task") {
-      Button("Organize Files") { model.submit() }.keyboardShortcut(.return, modifiers: .command)
+      Button("Organize Files") {
+        openWindow(id: "inventory")
+        model.submit()
+      }.keyboardShortcut(.return, modifiers: .command)
         .disabled(!model.canSubmit)
       Button("Cancel Task") { model.cancel() }.keyboardShortcut(".")
         .disabled(!model.canCancel)

@@ -96,3 +96,6 @@ PY
 # including the transfer suite's real local HTTP server rather than widening the host sandbox.
 swift test --configuration release --skip-build --disable-automatic-resolution \
   --filter 'ModelSetupTests|ModelTransferTests|WorkerSupervisorTests' 2>&1 | tee "$out/model-supervisor.log"
+# UI fixtures use their own windows, temporary files and injected local completions.
+swift test --configuration release --skip-build --disable-automatic-resolution \
+  --filter 'WorkspaceModelTests|SettingsLifecycleTests|WorkspaceGeometryTests' 2>&1 | tee "$out/workspace.log"

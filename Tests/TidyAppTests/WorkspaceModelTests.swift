@@ -17,6 +17,7 @@ struct WorkspaceModelTests {
       completion: { _, _, _ in
         await gate.complete()
       })
+    model.windowDidOpen()
     model.inspect(fixture.folder, forWriting: true)
     await model.waitUntilFinished()
     model.submit()
@@ -50,6 +51,7 @@ struct WorkspaceModelTests {
       completion: { _, _, _ in
         await gate.complete()
       })
+    model.windowDidOpen()
     model.inspect(fixture.folder, forWriting: true)
     await model.waitUntilFinished()
     model.submit()
@@ -78,6 +80,7 @@ struct WorkspaceModelTests {
         Issue.record("No inference should run without readiness and write authority")
         return sortResponse
       })
+    model.windowDidOpen()
     model.inspect(fixture.folder)
     await model.waitUntilFinished()
     #expect(!model.canSubmit)
@@ -104,6 +107,7 @@ struct WorkspaceModelTests {
       completion: { _, _, _ in
         sortResponse
       })
+    model.windowDidOpen()
     model.inspect(fixture.folder, forWriting: true)
     await model.waitUntilFinished()
     model.submit()
@@ -139,6 +143,7 @@ struct WorkspaceModelTests {
       completion: { _, _, _ in
         sortResponse
       })
+    model.windowDidOpen()
     model.inspect(fixture.folder, forWriting: true)
     await model.waitUntilFinished()
     model.submit()
@@ -170,6 +175,7 @@ struct WorkspaceModelTests {
       completion: { _, _, _ in
         sortResponse
       })
+    model.windowDidOpen()
     model.inspect(fixture.folder, forWriting: true)
     await model.waitUntilFinished()
     model.submit()
@@ -202,6 +208,7 @@ struct WorkspaceModelTests {
       completion: { _, _, _ in
         sortResponse
       })
+    model.windowDidOpen()
     model.inspect(fixture.folder, forWriting: true)
     await model.waitUntilFinished()
     model.submit()
@@ -224,12 +231,57 @@ struct WorkspaceModelTests {
     let model = WorkspaceModel(
       coordinator: TaskCoordinator(bookmarkFile: fixture.bookmark), modelIsReady: { true },
       completion: { _, _, _ in sortResponse })
+    model.windowDidOpen()
     model.restoreIfNeeded()
     await model.waitUntilFinished()
     #expect(model.inventory == nil)
     #expect(model.feedback?.kind == .failure)
     #expect(model.history?.operations.count == 1)
     #expect(model.recovery.count == 1)
+  }
+
+  @Test func closedWorkspaceCannotStartTaskUntilReopened() async throws {
+    let fixture = try WorkspaceFixture(count: 1)
+    defer { fixture.remove() }
+    let coordinator = TaskCoordinator(bookmarkFile: fixture.bookmark)
+    let model = WorkspaceModel(
+      coordinator: coordinator, modelIsReady: { true },
+      completion: { _, _, _ in sortResponse })
+    model.windowDidOpen()
+    model.inspect(fixture.folder, forWriting: true)
+    await model.waitUntilFinished()
+    #expect(model.canSubmit)
+    model.closeWindow()
+    #expect(!model.canSubmit)
+    model.submit()
+    #expect(model.phase == .idle)
+    #expect(try await coordinator.historySnapshot().operations.isEmpty)
+    model.windowDidOpen()
+    model.submit()
+    await model.waitUntilFinished()
+    #expect(model.result?.changed.count == 1)
+  }
+
+  @Test func refreshingSameFolderRetainsInventoryAndComposerContext() async throws {
+    let fixture = try WorkspaceFixture(count: 2)
+    defer { fixture.remove() }
+    let model = WorkspaceModel(
+      coordinator: TaskCoordinator(bookmarkFile: fixture.bookmark),
+      modelIsReady: { true }, completion: { _, _, _ in sortResponse })
+    model.windowDidOpen()
+    model.inspect(fixture.folder, forWriting: true)
+    await model.waitUntilFinished()
+    let names = model.inventory?.items.map(\.name)
+    let selectedFolder = try #require(model.inventory?.folder)
+    model.request = "Group by modification month"
+    model.inspect()
+    #expect(model.phase == .inspecting)
+    #expect(model.inventory?.folder == selectedFolder)
+    #expect(model.inventory?.items.map(\.name) == names)
+    #expect(model.request == "Group by modification month")
+    await model.waitUntilFinished()
+    #expect(model.inventory?.items.map(\.name) == names)
+    #expect(!model.isBusy)
   }
 }
 
