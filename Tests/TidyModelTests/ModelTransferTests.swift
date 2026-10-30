@@ -4,6 +4,42 @@ import Testing
 import TidyModel
 
 struct ModelTransferTests {
+  @MainActor @Test func setupReportsReceivedBytesBeforeTheCurrentFileCompletes() async throws {
+    let server = try HTTPFixture(large: true)
+    defer { server.stop() }
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let manifest = ModelManifest(
+      id: "fixture", revision: "progress-v1", name: "Slow weights fixture",
+      files: [
+        .init(
+          name: "model.safetensors", bytes: 1_000_000,
+          sha256: "cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0",
+          url: server.url)
+      ])
+    let setup = ModelSetup(
+      root: root, manifest: manifest,
+      transfer: URLSessionModelTransfer(allowLoopbackHTTP: true), runtime: ProgressFixtureRuntime())
+    let operation = Task { await setup.download(consent: true) }
+    for _ in 0..<100 {
+      if server.sentFirstChunk { break }
+      try await Task.sleep(for: .milliseconds(5))
+    }
+    let sent = server.sentFirstChunk
+    try await Task.sleep(for: .milliseconds(100))
+    let observed = setup.state
+    await operation.value
+    #expect(sent, "The server must have sent a partial response before observing progress")
+    guard case .downloading(let file, let received, let total) = observed else {
+      Issue.record("Expected an in-flight weights download, not a completed or failed transfer")
+      return
+    }
+    #expect(file == "model.safetensors")
+    #expect(received > 0, "Received body bytes must be visible before the weights file finishes")
+    #expect(received < total)
+    #expect(setup.state == .ready)
+  }
+
   @MainActor @Test func corruptAndTruncatedHTTPDownloadsNeverReachReadiness() async throws {
     for truncated in [false, true] {
       let server = try HTTPFixture(badBody: true, truncated: truncated)
@@ -72,6 +108,13 @@ struct ModelTransferTests {
   }
 }
 
+private actor ProgressFixtureRuntime: LocalModelRuntime {
+  func loadAndCheck(directory: URL, commit: @Sendable () throws -> Void) async throws {
+    try commit()
+  }
+  func unload() async {}
+}
+
 private actor NeverLoadRuntime: LocalModelRuntime {
   func loadAndCheck(directory: URL, commit: @Sendable () throws -> Void) async throws {
     Issue.record("Corrupt downloads must not load")
@@ -82,7 +125,10 @@ private actor NeverLoadRuntime: LocalModelRuntime {
 private final class HTTPRecord: @unchecked Sendable {
   private let lock = NSLock()
   private var range = false
+  private var firstChunk = false
   var sawRange: Bool { lock.withLock { range } }
+  var sentFirstChunk: Bool { lock.withLock { firstChunk } }
+  func recordFirstChunk() { lock.withLock { firstChunk = true } }
   func record(_ request: String) {
     lock.withLock { range = range || request.lowercased().contains("range:") }
   }
@@ -93,6 +139,7 @@ private final class HTTPFixture: @unchecked Sendable {
   let port: UInt16
   private let record: HTTPRecord
   var sawRange: Bool { record.sawRange }
+  var sentFirstChunk: Bool { record.sentFirstChunk }
   var url: URL { URL(string: "http://127.0.0.1:\(port)/redirect")! }
   init(
     large: Bool = false, honorsRange: Bool = false, badBody: Bool = false, truncated: Bool = false
@@ -132,6 +179,7 @@ private final class HTTPFixture: @unchecked Sendable {
           connection.send(
             content: Data(headers.utf8) + Data(repeating: 97, count: 100_000),
             completion: .contentProcessed { _ in
+              record.recordFirstChunk()
               DispatchQueue.global().asyncAfter(deadline: .now() + 1) {
                 connection.send(
                   content: Data(repeating: 97, count: 900_000),

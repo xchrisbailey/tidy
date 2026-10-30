@@ -67,10 +67,21 @@ public struct ModelManifest: Sendable {
 /// Cancellation may retain opaque URLSession resume data; explicit deletion follows quiescence.
 public protocol ModelTransfer: Sendable {
   func download(_ file: ModelFile, to destination: URL, resumeFile: URL) async throws
+  func download(
+    _ file: ModelFile, to destination: URL, resumeFile: URL,
+    progress: @escaping @Sendable (Int64) async -> Void
+  ) async throws
   func discardPartials(in directory: URL) async throws
 }
 
 extension ModelTransfer {
+  public func download(
+    _ file: ModelFile, to destination: URL, resumeFile: URL,
+    progress: @escaping @Sendable (Int64) async -> Void
+  ) async throws {
+    try await download(file, to: destination, resumeFile: resumeFile)
+  }
+
   public func discardPartials(in directory: URL) async throws {}
 }
 
@@ -298,9 +309,14 @@ public final class ModelSetup {
             try ModelStorage.removeIfPresent(destination)
             activity = .downloading(
               file: file.name, completedBytes: completed, totalBytes: manifest.downloadBytes)
+            let verifiedBytes = completed
             try await transfer.download(
               file, to: destination,
-              resumeFile: staging.appendingPathComponent(file.name + ".resume"))
+              resumeFile: staging.appendingPathComponent(file.name + ".resume")
+            ) { [weak self] received in
+              await self?.updateDownloadProgress(
+                file: file, verifiedBytes: verifiedBytes, received: received)
+            }
             try Task.checkCancellation()
             guard try await ModelStorage.matches(file, at: destination) else {
               try ModelStorage.removeIfPresent(destination)
@@ -340,5 +356,14 @@ public final class ModelSetup {
         )
       }
     }
+  }
+
+  private func updateDownloadProgress(file: ModelFile, verifiedBytes: Int64, received: Int64) {
+    guard !stopping, case .downloading(let currentFile, _, _) = activity,
+      currentFile == file.name
+    else { return }
+    activity = .downloading(
+      file: file.name, completedBytes: verifiedBytes + min(file.bytes, max(0, received)),
+      totalBytes: manifest.downloadBytes)
   }
 }

@@ -108,9 +108,12 @@ struct ModelSetupView: View {
       ProgressView("Checking storage…")
     case .downloading(let file, let completed, let total):
       ProgressView(value: Double(completed), total: Double(total)) {
-        Text("Downloading \(file)… \(size(completed)) of \(size(total)) verified")
+        Text("Downloading \(file)… \(size(completed)) of \(size(total)) received")
       }
-      Text("Progress advances when each file finishes and verifies.").font(.caption)
+      Text(
+        "Received bytes update during each file. Readiness still requires integrity and local inference checks."
+      )
+      .font(.caption)
     case .verifying:
       ProgressView("Verifying every file’s size and SHA-256…")
     case .loading:

@@ -6,6 +6,35 @@ public struct URLSessionModelTransfer: ModelTransfer {
   public init(allowLoopbackHTTP: Bool = false) { self.allowLoopbackHTTP = allowLoopbackHTTP }
 
   public func download(_ file: ModelFile, to destination: URL, resumeFile: URL) async throws {
+    try await download(file, to: destination, resumeFile: resumeFile, progress: { _ in })
+  }
+
+  public func download(
+    _ file: ModelFile, to destination: URL, resumeFile: URL,
+    progress: @escaping @Sendable (Int64) async -> Void
+  ) async throws {
+    let (events, continuation) = AsyncStream<Int64>.makeStream(bufferingPolicy: .bufferingNewest(1))
+    let reporter = Task {
+      for await received in events { await progress(received) }
+    }
+    do {
+      try await downloadFile(file, to: destination, resumeFile: resumeFile) { received in
+        continuation.yield(received)
+      }
+    } catch {
+      continuation.finish()
+      await reporter.value
+      throw error
+    }
+    // Drain the last callback before the caller advances to verification or another file.
+    continuation.finish()
+    await reporter.value
+  }
+
+  private func downloadFile(
+    _ file: ModelFile, to destination: URL, resumeFile: URL,
+    progress: @escaping @Sendable (Int64) -> Void
+  ) async throws {
     guard permits(file.url) else { throw URLError(.unsupportedURL) }
     let configuration = URLSessionConfiguration.ephemeral
     configuration.urlCache = nil
@@ -18,7 +47,7 @@ public struct URLSessionModelTransfer: ModelTransfer {
         do {
           try await DownloadOperation(
             file: file, destination: destination, resumeFile: resumeFile,
-            allowLoopbackHTTP: allowLoopbackHTTP
+            allowLoopbackHTTP: allowLoopbackHTTP, progress: progress
           ).run(configuration: configuration, resume: resume)
         } catch {
           try Task.checkCancellation()
@@ -27,13 +56,13 @@ public struct URLSessionModelTransfer: ModelTransfer {
           try discardResumeFile(resumeFile)
           try await DownloadOperation(
             file: file, destination: destination, resumeFile: resumeFile,
-            allowLoopbackHTTP: allowLoopbackHTTP
+            allowLoopbackHTTP: allowLoopbackHTTP, progress: progress
           ).run(configuration: configuration, resume: nil)
         }
       } else {
         try await DownloadOperation(
           file: file, destination: destination, resumeFile: resumeFile,
-          allowLoopbackHTTP: allowLoopbackHTTP
+          allowLoopbackHTTP: allowLoopbackHTTP, progress: progress
         ).run(configuration: configuration, resume: nil)
       }
       try Task.checkCancellation()
@@ -82,6 +111,7 @@ private final class DownloadOperation: NSObject, URLSessionDownloadDelegate, @un
   private let destination: URL
   private let resumeFile: URL
   private let allowLoopbackHTTP: Bool
+  private let progress: @Sendable (Int64) -> Void
   private let lock = NSLock()
   private var continuation: CheckedContinuation<Void, any Error>?
   private var task: URLSessionDownloadTask?
@@ -92,11 +122,15 @@ private final class DownloadOperation: NSObject, URLSessionDownloadDelegate, @un
   private var resumeData: Data?
   private var failure: (any Error)?
 
-  init(file: ModelFile, destination: URL, resumeFile: URL, allowLoopbackHTTP: Bool) {
+  init(
+    file: ModelFile, destination: URL, resumeFile: URL, allowLoopbackHTTP: Bool,
+    progress: @escaping @Sendable (Int64) -> Void
+  ) {
     self.file = file
     self.destination = destination
     self.resumeFile = resumeFile
     self.allowLoopbackHTTP = allowLoopbackHTTP
+    self.progress = progress
   }
 
   func run(configuration: URLSessionConfiguration, resume: Data?) async throws {
@@ -132,6 +166,20 @@ private final class DownloadOperation: NSObject, URLSessionDownloadDelegate, @un
       }
       self.finishIfQuiescent()
     }
+  }
+
+  func urlSession(
+    _ session: URLSession, downloadTask: URLSessionDownloadTask, didWriteData bytesWritten: Int64,
+    totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64
+  ) {
+    progress(min(file.bytes, max(0, totalBytesWritten)))
+  }
+
+  func urlSession(
+    _ session: URLSession, downloadTask: URLSessionDownloadTask,
+    didResumeAtOffset fileOffset: Int64, expectedTotalBytes: Int64
+  ) {
+    progress(min(file.bytes, max(0, fileOffset)))
   }
 
   func urlSession(
