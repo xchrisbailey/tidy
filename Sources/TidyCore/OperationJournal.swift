@@ -104,17 +104,25 @@ final class OperationJournal {
     self.directory = directory
     try FileManager.default.createDirectory(
       at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-    lock = open(
+    let descriptor = open(
       directory.appendingPathComponent("operations.lock").path,
       O_CREAT | O_RDWR | O_NOFOLLOW | O_CLOEXEC, 0o600)
-    guard lock >= 0 else { throw SortError.journalUnavailable }
-    guard flock(lock, LOCK_EX | LOCK_NB) == 0 else {
-      close(lock)
+    guard descriptor >= 0 else { throw SortError.journalUnavailable }
+    guard flock(descriptor, LOCK_EX | LOCK_NB) == 0 else {
+      close(descriptor)
       throw SortError.busy
     }
+    // A throwing, fully initialized class runs deinit. Transfer ownership only after acquisition,
+    // so rejection cannot close a descriptor twice after another thread has reused its number.
+    lock = descriptor
   }
 
-  deinit { close(lock) }
+  deinit {
+    // A concurrent process launch can retain a reference to this open file description until
+    // exec. Release our lock explicitly; close alone waits for every inherited reference.
+    flock(lock, LOCK_UN)
+    close(lock)
+  }
 
   func load() throws -> [FileOperation] {
     guard FileManager.default.fileExists(atPath: file.path) else { return [] }
