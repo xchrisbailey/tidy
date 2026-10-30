@@ -85,7 +85,7 @@ extension TaskCoordinator {
             throw SortError.conflict
           }
           identities[folder] = FileIdentity(info)
-          existing[folder] = try directoryNames(directory)
+          existing[folder] = try directoryNames(directory, caseFolded: false)
         } else {
           existing[folder] = []
         }
@@ -94,20 +94,13 @@ extension TaskCoordinator {
     var changes: [PlannedChange] = []
     var allocated: [String: Set<String>] = [:]
     for (item, folder, proposed) in proposals {
-      var name = proposed
-      if existing[folder, default: []].contains(name.lowercased())
-        || allocated[folder, default: []].contains(name.lowercased())
-      {
-        let url = URL(fileURLWithPath: proposed)
-        let ext = url.pathExtension
-        let stem = ext.isEmpty ? proposed : url.deletingPathExtension().lastPathComponent
-        var suffix = 2
-        repeat {
-          name = "\(stem) (\(suffix))" + (ext.isEmpty ? "" : ".\(ext)")
-          suffix += 1
-        } while existing[folder, default: []].contains(name.lowercased())
-          || reserved[folder, default: []].contains(name.lowercased())
-      }
+      let occupied = Set(
+        existing[folder, default: []].filter {
+          folder != relativeParent(item.name) || $0 != relativeLeaf(item.name)
+        }.map { $0.lowercased() })
+      let name = allocateName(
+        proposed, occupied: occupied, reserved: reserved[folder, default: []],
+        allocated: allocated[folder, default: []])
       guard validFileName(name), let snapshot = item.snapshot else {
         throw PlanningError.invalidResponse
       }

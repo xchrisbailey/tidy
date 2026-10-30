@@ -135,10 +135,13 @@ struct RecursiveScopeTests {
     try fixture.write("Preserve THIS/deep/REPORT 2026-10-28 AB123.TXT")
     let coordinator = TaskCoordinator(bookmarkFile: fixture.bookmark)
     _ = try await coordinator.selectFolderForWriting(fixture.folder)
-    let request = "Lowercase filenames including subfolders"
+    let request = "Lowercase filenames and prepend ‘Filed-’, including subfolders"
     let response = try metadataResponse(
       request: request, sort: "none",
-      rename: [["kind": "lowercase", "evidence": "Lowercase filenames", "value": "", "from": ""]])
+      rename: [
+        ["kind": "lowercase", "evidence": "Lowercase filenames", "value": "", "from": ""],
+        ["kind": "prefix", "evidence": "prepend ‘Filed-’", "value": "Filed-", "from": ""],
+      ])
     let outcome = try await coordinator.planTask(request: request, model: { _, _, _ in response })
     guard case .plan(let plan) = outcome else {
       Issue.record("Expected nested rename")
@@ -148,7 +151,7 @@ struct RecursiveScopeTests {
     #expect(plan.moveCount == 0)
     #expect(try await coordinator.execute(plan).changed.count == 1)
     let renamed = fixture.folder.appendingPathComponent(
-      "Preserve THIS/deep/report 2026-10-28 AB123 (2).TXT")
+      "Preserve THIS/deep/Filed-report 2026-10-28 AB123.TXT")
     #expect(try String(contentsOf: renamed, encoding: .utf8) == "fixture")
     try fixture.write("Preserve THIS/deep/REPORT 2026-10-28 AB123.TXT")
     let reopened = TaskCoordinator(bookmarkFile: fixture.bookmark)

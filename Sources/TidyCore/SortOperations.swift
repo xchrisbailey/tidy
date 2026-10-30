@@ -1,6 +1,13 @@
 import Darwin
 import Foundation
 
+public struct UndoProgress: Sendable {
+  public let taskID: UUID
+  public let processed: Int
+  public let total: Int
+  public let undone: Int
+}
+
 private struct WriteGrant: Codable {
   let bookmark: Data
   let identity: FileIdentity
@@ -49,8 +56,6 @@ extension TaskCoordinator {
     guard let source = entryInfo(root.fd, item.name), source.st_mode & S_IFMT == S_IFREG,
       source.st_nlink == 1, FileSnapshot(source) == item.snapshot
     else { throw SortError.staleSource }
-    let sourceFD = try pinFile(root.fd, item.name, identity: FileIdentity(source))
-    defer { close(sourceFD) }
     let journal = try OperationJournal(directory: bookmarkFile.deletingLastPathComponent())
     var entries = try journal.load()
     let existingDestination = try checkedEntryInfo(root.fd, destination)
@@ -60,47 +65,14 @@ extension TaskCoordinator {
       defer { close(directory) }
       guard try checkedEntryInfo(directory, item.name) == nil else { throw SortError.conflict }
     }
-    var entry = FileOperation(
-      id: UUID(), originalName: item.name, destinationFolder: destination,
-      selectedFolderPath: root.url.path, state: .intent,
-      rootIdentity: root.identity, fileIdentity: FileIdentity(source))
-    entries.append(entry)
-    try journal.save(entries)
-    try operationCheckpoint(.intentSaved)
-    if existingDestination == nil {
-      guard mkdirat(root.fd, destination, 0o755) == 0,
-        let created = entryInfo(root.fd, destination)
-      else { throw SortError.conflict }
-      try operationCheckpoint(.folderCreated)
-      entry.createdFolder = FileIdentity(created)
-      entries[entries.count - 1] = entry
-      try journal.save(entries)
-    }
-    let directory = try childDirectory(root.fd, destination)
-    defer { close(directory) }
-    var directoryInfo = stat()
-    guard fstat(directory, &directoryInfo) == 0,
-      entryInfo(root.fd, destination).map(FileIdentity.init) == FileIdentity(directoryInfo),
-      FileIdentity(directoryInfo)
-        == (entry.createdFolder ?? existingDestination.map(FileIdentity.init))
-    else { throw SortError.conflict }
-    entry.destinationIdentity = FileIdentity(directoryInfo)
-    entries[entries.count - 1] = entry
-    guard fsync(root.fd) == 0 else { throw SortError.unavailable }
-    try journal.save(entries)
-    guard let current = entryInfo(root.fd, item.name), FileIdentity(current) == entry.fileIdentity,
-      FileSnapshot(current) == item.snapshot
-    else { throw SortError.staleSource }
-    try operationCheckpoint(.beforeMove)
-    try moveExclusive(root.fd, item.name, directory)
-    try operationCheckpoint(.afterMove)
-    guard entryInfo(directory, item.name).map(FileIdentity.init) == entry.fileIdentity else {
-      throw SortError.uncertainIdentity
-    }
-    entry.state = .completed
-    entries[entries.count - 1] = entry
-    try journal.save(entries)
-    try operationCheckpoint(.completionSaved)
+    let change = PlannedChange(
+      originalName: item.name, destinationFolder: destination, destinationName: item.name,
+      snapshot: FileSnapshot(source),
+      destinationIdentity: existingDestination.map(FileIdentity.init))
+    var createdFolders: [String: FileIdentity] = [:]
+    let entry = try apply(
+      change, taskID: nil, root: root, journal: journal,
+      entries: &entries, createdFolders: &createdFolders)
     selectedInventory = nil
     return entry
   }
@@ -122,14 +94,18 @@ extension TaskCoordinator {
     return entries
   }
 
-  public func undoTask(_ taskID: UUID) throws {
-    do { try undoRecordedTask(taskID) } catch {
+  public func undoTask(
+    _ taskID: UUID, progress: @Sendable (UndoProgress) async -> Void = { _ in }
+  ) async throws {
+    do { try await undoRecordedTask(taskID, progress: progress) } catch {
       recordDiagnostic(.recoveryFailure)
       throw error
     }
   }
 
-  private func undoRecordedTask(_ taskID: UUID) throws {
+  private func undoRecordedTask(
+    _ taskID: UUID, progress: @Sendable (UndoProgress) async -> Void
+  ) async throws {
     guard !activeTask else { throw SortError.busy }
     try Task.checkCancellation()
     let root = try writableFolder()
@@ -138,8 +114,16 @@ extension TaskCoordinator {
     try reconcile(&entries, root: root, journal: journal)
     let operations = entries.filter { $0.taskID == taskID }
     guard !operations.isEmpty else { throw SortError.uncertainIdentity }
+    activeTask = true
+    defer {
+      activeTask = false
+      selectedInventory = nil
+      // Keep cross-coordinator exclusion across every progress suspension, including the last.
+      withExtendedLifetime(journal) {}
+    }
+    await progress(undoProgress(taskID, processed: 0, operations: operations, entries: entries))
     var firstError: (any Error)?
-    for entry in operations.reversed() {
+    for (index, entry) in operations.reversed().enumerated() {
       try Task.checkCancellation()
       do {
         try undo(entry.id, root: root, journal: journal, entries: &entries)
@@ -149,9 +133,26 @@ extension TaskCoordinator {
         if firstError == nil { firstError = SortError.uncertainIdentity }
       } catch SortError.newerOperation {
         if firstError == nil { firstError = SortError.newerOperation }
+      } catch {
+        // A checkpoint or persistence failure can follow the actual reversal. Report only
+        // terminal states retained in the journal, not an optimistic in-memory state.
+        let retained = (try? journal.load()) ?? []
+        await progress(
+          undoProgress(taskID, processed: index + 1, operations: operations, entries: retained))
+        throw error
       }
+      await progress(
+        undoProgress(taskID, processed: index + 1, operations: operations, entries: entries))
     }
     if let firstError { throw firstError }
+  }
+
+  private func undoProgress(
+    _ taskID: UUID, processed: Int, operations: [FileOperation], entries: [FileOperation]
+  ) -> UndoProgress {
+    UndoProgress(
+      taskID: taskID, processed: processed, total: operations.count,
+      undone: entries.filter { $0.taskID == taskID && $0.state == .undone }.count)
   }
 
   public func undoFile(_ operationID: UUID) throws {
@@ -203,7 +204,14 @@ extension TaskCoordinator {
     else { throw SortError.uncertainIdentity }
     let sourceFD = try pinFile(directory, entry.destinationName, identity: entry.fileIdentity)
     defer { close(sourceFD) }
-    guard try checkedEntryInfo(root.fd, entry.originalName) == nil else { throw SortError.conflict }
+    guard
+      try destinationAvailable(
+        root.fd, entry.originalName,
+        caseAliasIdentity: isCaseOnlyRename(
+          original: entry.originalName, folder: entry.destinationFolder, name: entry.destinationName
+        )
+          ? entry.fileIdentity : nil)
+    else { throw SortError.conflict }
     entry.state = .undoIntent
     entries[index] = entry
     try journal.save(entries)

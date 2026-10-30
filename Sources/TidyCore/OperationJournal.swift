@@ -269,8 +269,10 @@ func validFileName(_ name: String) -> Bool {
     && !name.contains("/") && !name.contains("\0") && ![".", ".."].contains(name)
 }
 
-func directoryNames(_ directory: Int32) throws -> Set<String> {
-  let copy = dup(directory)
+func directoryNames(_ directory: Int32, caseFolded: Bool = true) throws -> Set<String> {
+  // dup shares the directory offset. Independent enumeration is required when reconciliation
+  // inspects the same pinned directory again while constructing the recovery report.
+  let copy = openat(directory, ".", O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
   guard copy >= 0 else { throw SortError.unavailable }
   guard let stream = fdopendir(copy) else {
     close(copy)
@@ -289,6 +291,6 @@ func directoryNames(_ directory: Int32) throws -> Set<String> {
         String(cString: $0)
       }
     }
-    names.insert(name.lowercased())
+    names.insert(caseFolded ? name.lowercased() : name)
   }
 }

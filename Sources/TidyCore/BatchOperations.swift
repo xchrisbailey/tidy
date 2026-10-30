@@ -125,20 +125,9 @@ extension TaskCoordinator {
         // Metadata-only enumeration also reserves case variants on case-sensitive volumes.
         existingNames = try directoryNames(directory)
       }
-      var name = item.name
-      if existingNames.contains(name.lowercased())
-        || allocated[destination, default: []].contains(name.lowercased())
-      {
-        let url = URL(fileURLWithPath: item.name)
-        let ext = url.pathExtension
-        let stem = url.deletingPathExtension().lastPathComponent
-        var suffix = 2
-        repeat {
-          name = "\(stem) (\(suffix))" + (ext.isEmpty ? "" : ".\(ext)")
-          suffix += 1
-        } while existingNames.contains(name.lowercased())
-          || reserved[destination, default: []].contains(name.lowercased())
-      }
+      let name = allocateName(
+        item.name, occupied: existingNames, reserved: reserved[destination, default: []],
+        allocated: allocated[destination, default: []])
       guard validFileName(name) else { throw SortError.invalidPlan }
       reserved[destination, default: []].insert(name.lowercased())
       allocated[destination, default: []].insert(name.lowercased())
@@ -203,7 +192,14 @@ extension TaskCoordinator {
       if info != nil {
         let directory = try childDirectory(root.fd, change.destinationFolder)
         defer { close(directory) }
-        guard try checkedEntryInfo(directory, change.destinationName) == nil else {
+        guard
+          try destinationAvailable(
+            directory, change.destinationName,
+            caseAliasIdentity: isCaseOnlyRename(
+              original: change.originalName, folder: change.destinationFolder,
+              name: change.destinationName)
+              ? change.snapshot.identity : nil)
+        else {
           throw SortError.conflict
         }
       }
@@ -276,8 +272,8 @@ extension TaskCoordinator {
     return result
   }
 
-  private func apply(
-    _ change: PlannedChange, taskID: UUID, root: ScopedDirectory, journal: OperationJournal,
+  func apply(
+    _ change: PlannedChange, taskID: UUID?, root: ScopedDirectory, journal: OperationJournal,
     entries: inout [FileOperation], createdFolders: inout [String: FileIdentity]
   ) throws -> FileOperation {
     var rootInfo = stat()
@@ -292,16 +288,24 @@ extension TaskCoordinator {
     if existing != nil {
       let directory = try childDirectory(root.fd, change.destinationFolder)
       defer { close(directory) }
-      guard try checkedEntryInfo(directory, change.destinationName) == nil else {
+      guard
+        try destinationAvailable(
+          directory, change.destinationName,
+          caseAliasIdentity: isCaseOnlyRename(
+            original: change.originalName, folder: change.destinationFolder,
+            name: change.destinationName)
+            ? change.snapshot.identity : nil)
+      else {
         throw SortError.conflict
       }
     }
     var entry = FileOperation(
       id: UUID(), originalName: change.originalName,
       destinationFolder: change.destinationFolder, selectedFolderPath: root.url.path,
-      batchID: taskID, resultingName: change.destinationName, state: .intent,
+      batchID: taskID, resultingName: taskID == nil ? nil : change.destinationName, state: .intent,
       rootIdentity: root.identity, fileIdentity: change.snapshot.identity)
     entry.ancestorIdentities = change.ancestorIdentities
+    entry.destinationIdentity = existing.map(FileIdentity.init)
     entries.append(entry)
     let index = entries.count - 1
     try journal.save(entries)
@@ -336,6 +340,9 @@ extension TaskCoordinator {
       throw SortError.staleSource
     }
     try operationCheckpoint(.beforeMove)
+    guard lstat(root.url.path, &rootInfo) == 0, FileIdentity(rootInfo) == root.identity else {
+      throw SortError.uncertainIdentity
+    }
     try validateAncestors(root.fd, change.ancestorIdentities)
     let sourceParent = try relativeDirectory(root.fd, relativeParent(change.originalName))
     defer { close(sourceParent) }
@@ -362,12 +369,6 @@ extension TaskCoordinator {
   }
 
   private func movedFileExists(_ entry: FileOperation, root: ScopedDirectory) -> Bool {
-    guard entryInfo(root.fd, entry.originalName) == nil,
-      entryInfo(root.fd, entry.destinationFolder).map(FileIdentity.init)
-        == entry.destinationIdentity,
-      let directory = try? childDirectory(root.fd, entry.destinationFolder)
-    else { return false }
-    defer { close(directory) }
-    return entryInfo(directory, entry.destinationName).map(FileIdentity.init) == entry.fileIdentity
+    (try? observedOperation(entry, root: root)) == .completed
   }
 }

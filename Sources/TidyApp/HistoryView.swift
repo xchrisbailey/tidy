@@ -81,7 +81,14 @@ struct HistoryView: View {
       if isWorking { ProgressView().controlSize(.small) }
       if undoActivity.isWorking {
         HStack {
-          ProgressView().controlSize(.small)
+          if let progress = undoActivity.progress {
+            ProgressView(value: Double(progress.processed), total: Double(max(progress.total, 1)))
+              .accessibilityLabel("Undo progress")
+              .accessibilityValue(
+                "\(progress.processed) of \(progress.total) checked; \(progress.undone) undone")
+          } else {
+            ProgressView().controlSize(.small)
+          }
           Button(undoActivity.isCancelling ? "Cancelling…" : "Cancel Undo") {
             undoActivity.cancel()
           }

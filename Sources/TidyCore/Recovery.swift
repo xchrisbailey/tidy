@@ -68,7 +68,13 @@ extension TaskCoordinator {
       } else {
         status = .uncertain
       }
-      let occupied = entryInfo(root.fd, entry.originalName) != nil
+      let occupied =
+        (try? destinationAvailable(
+          root.fd, entry.originalName,
+          caseAliasIdentity: isCaseOnlyRename(
+            original: entry.originalName, folder: entry.destinationFolder,
+            name: entry.destinationName)
+            ? entry.fileIdentity : nil)) != true
       let options: [RecoveryOption]
       let explanation: String
       switch status {
@@ -117,6 +123,24 @@ func observedOperation(_ entry: FileOperation, root: ScopedDirectory) throws -> 
       entryInfo(root.fd, entry.destinationFolder).map(FileIdentity.init) == FileIdentity(folder)
     else { return nil }
     resulting = try checkedEntryInfo(directory, entry.destinationName)
+    if isCaseOnlyRename(
+      original: entry.originalName, folder: entry.destinationFolder, name: entry.destinationName),
+      original.map(FileIdentity.init) == entry.fileIdentity,
+      resulting.map(FileIdentity.init) == entry.fileIdentity,
+      original.map({ $0.st_mode & S_IFMT == S_IFREG && $0.st_nlink == 1 }) == true,
+      resulting.map({ $0.st_mode & S_IFMT == S_IFREG && $0.st_nlink == 1 }) == true
+    {
+      // Alias lookup cannot tell which spelling is actually present. Exact directory entries can;
+      // recovery must distinguish an interrupted rename from one that never left its source name.
+      let names = try directoryNames(directory, caseFolded: false)
+      if names.contains(entry.destinationName), !names.contains(relativeLeaf(entry.originalName)) {
+        return .completed
+      }
+      if names.contains(relativeLeaf(entry.originalName)), !names.contains(entry.destinationName) {
+        return .notApplied
+      }
+      return nil
+    }
   }
   func matches(_ info: stat?) -> Bool {
     guard let info else { return false }

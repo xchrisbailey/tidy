@@ -3,6 +3,140 @@ import Testing
 import TidyCore
 
 struct MetadataIntentTests {
+  @Test(arguments: ["beforeExecution", "beforeMove", "undo"])
+  func caseOnlyNamingNeverOverwritesAnUnrelatedReplacement(stage: String) async throws {
+    let fixture = try LanguageFixture()
+    defer { fixture.remove() }
+    try fixture.write("Report.txt")
+    let parked = fixture.root.appendingPathComponent("parked.txt")
+    let source = fixture.folder.appendingPathComponent("Report.txt")
+    let target = fixture.folder.appendingPathComponent("report.txt")
+    let coordinator = TaskCoordinator(bookmarkFile: fixture.bookmark) { point in
+      if (stage == "beforeMove" && point == .beforeMove)
+        || (stage == "undo" && point == .undoIntentSaved)
+      {
+        try FileManager.default.moveItem(at: stage == "undo" ? target : source, to: parked)
+        try Data("unrelated".utf8).write(to: stage == "undo" ? source : target)
+      }
+    }
+    _ = try await coordinator.selectFolderForWriting(fixture.folder)
+    let request = "Lowercase names"
+    let response = try metadataResponse(
+      request: request, sort: "none",
+      rename: [["kind": "lowercase", "evidence": request, "value": "", "from": ""]])
+    let outcome = try await coordinator.planTask(request: request, model: { _, _, _ in response })
+    guard case .plan(let plan) = outcome else {
+      Issue.record("Expected case-only plan")
+      return
+    }
+    if stage == "beforeExecution" {
+      try FileManager.default.moveItem(at: source, to: parked)
+      try Data("unrelated".utf8).write(to: target)
+      await #expect(throws: SortError.conflict) { try await coordinator.execute(plan) }
+    } else {
+      let result = try await coordinator.execute(plan)
+      if stage == "undo" {
+        #expect(result.changed.count == 1)
+        await #expect(throws: SortError.uncertainIdentity) {
+          try await coordinator.undoTask(plan.id)
+        }
+      } else {
+        #expect(result.changed.isEmpty)
+        #expect(result.skipped.first?.reason == .staleSource)
+      }
+    }
+    #expect(try Data(contentsOf: parked) == Data("fixture".utf8))
+    #expect(try Data(contentsOf: stage == "undo" ? source : target) == Data("unrelated".utf8))
+    let reopened = TaskCoordinator(bookmarkFile: fixture.bookmark)
+    #expect(try await reopened.recoveryReport().allSatisfy { !$0.options.contains(.undoFile) })
+  }
+
+  @Test(arguments: [
+    OperationCheckpoint.intentSaved, .beforeMove, .afterMove, .undoIntentSaved, .afterUndoMove,
+  ])
+  func caseOnlyInterruptionsReconcileExactSpellingWithoutResuming(checkpoint: OperationCheckpoint)
+    async throws
+  {
+    let fixture = try LanguageFixture()
+    defer { fixture.remove() }
+    try fixture.write("Report.txt")
+    let coordinator = TaskCoordinator(bookmarkFile: fixture.bookmark) { point in
+      if point == checkpoint { throw SortError.unavailable }
+    }
+    _ = try await coordinator.selectFolderForWriting(fixture.folder)
+    let request = "Lowercase names"
+    let response = try metadataResponse(
+      request: request, sort: "none",
+      rename: [["kind": "lowercase", "evidence": request, "value": "", "from": ""]])
+    let outcome = try await coordinator.planTask(request: request, model: { _, _, _ in response })
+    guard case .plan(let plan) = outcome else {
+      Issue.record("Expected case-only plan")
+      return
+    }
+    let result = try await coordinator.execute(plan)
+    let undoing = checkpoint == .undoIntentSaved || checkpoint == .afterUndoMove
+    if undoing {
+      await #expect(throws: SortError.unavailable) { try await coordinator.undoTask(plan.id) }
+    } else {
+      #expect(result.isPartial)
+      #expect(result.changed.count == (checkpoint == .afterMove ? 1 : 0))
+    }
+    let renamed = checkpoint == .afterMove || checkpoint == .undoIntentSaved
+    let expectedName = renamed ? "report.txt" : "Report.txt"
+    #expect(
+      try FileManager.default.contentsOfDirectory(atPath: fixture.folder.path) == [expectedName])
+    let reopened = TaskCoordinator(bookmarkFile: fixture.bookmark)
+    let report = try #require(try await reopened.recoveryReport().first)
+    let expectedStatus: RecoveryStatus =
+      renamed ? .completed : checkpoint == .afterUndoMove ? .undone : .unapplied
+    #expect(report.status == expectedStatus)
+    #expect(
+      try FileManager.default.contentsOfDirectory(atPath: fixture.folder.path) == [expectedName])
+    if renamed {
+      try await reopened.undoTask(plan.id)
+      #expect(
+        try FileManager.default.contentsOfDirectory(atPath: fixture.folder.path) == ["Report.txt"])
+    }
+  }
+
+  @Test(arguments: ["lowercase", "uppercase", "titlecase"], ["", "Nested/"])
+  func caseOnlyNamingUsesExactRequestedNameAndReopenedUndo(kind: String, parent: String)
+    async throws
+  {
+    let fixture = try LanguageFixture()
+    defer { fixture.remove() }
+    let original = kind == "lowercase" ? "Report.txt" : "report.txt"
+    let expected =
+      kind == "lowercase" ? "report.txt" : kind == "uppercase" ? "REPORT.txt" : "Report.txt"
+    let directory = fixture.folder.appendingPathComponent(parent)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    try fixture.write(parent + original)
+    let coordinator = TaskCoordinator(bookmarkFile: fixture.bookmark)
+    _ = try await coordinator.selectFolderForWriting(fixture.folder)
+    let request =
+      (kind == "titlecase" ? "Title case names" : "\(kind) names")
+      + (parent.isEmpty ? "" : " including subfolders")
+    let response = try metadataResponse(
+      request: request, sort: "none",
+      rename: [["kind": kind, "evidence": request, "value": "", "from": ""]])
+    let outcome = try await coordinator.planTask(request: request, model: { _, _, _ in response })
+    guard case .plan(let plan) = outcome else {
+      Issue.record("Expected case-only naming plan")
+      return
+    }
+    #expect(plan.changes.map(\.destinationName) == [expected])
+    #expect(try await coordinator.execute(plan).changed.count == 1)
+    #expect(try FileManager.default.contentsOfDirectory(atPath: directory.path) == [expected])
+    let reopened = TaskCoordinator(bookmarkFile: fixture.bookmark)
+    #expect(try await reopened.recoveryReport().first?.status == .completed)
+    #expect(try await reopened.recoveryReport().first?.options.contains(.undoTask) == true)
+    try await reopened.undoTask(plan.id)
+    #expect(try FileManager.default.contentsOfDirectory(atPath: directory.path) == [original])
+    #expect(
+      try Data(contentsOf: directory.appendingPathComponent(original)) == Data("fixture".utf8))
+    #expect(try await reopened.recoveryReport().first?.status == .undone)
+  }
+
   @Test(arguments: [
     "Give PDFs readable names based on their contents",
     "Give .txt files readable names based on their contents",
