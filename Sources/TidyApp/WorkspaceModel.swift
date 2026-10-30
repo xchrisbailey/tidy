@@ -176,7 +176,11 @@ final class WorkspaceModel {
     if undoActivity.isWorking { undoActivity.cancel() } else { operation?.cancel() }
   }
 
-  func windowDidOpen() { windowIsOpen = true }
+  func windowDidOpen() {
+    let reopening = !windowIsOpen && restored
+    windowIsOpen = true
+    if reopening && !isBusy { inspect() }
+  }
 
   func closeWindow() {
     windowIsOpen = false

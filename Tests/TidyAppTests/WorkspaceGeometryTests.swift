@@ -37,6 +37,7 @@ struct WorkspaceGeometryTests {
     defer { window.close() }
     window.contentView?.layoutSubtreeIfNeeded()
     try await Task.sleep(for: .milliseconds(100))
+    await model.waitUntilFinished()
     model.submit()
     await gate.waitUntilStarted()
     model.destination = .history

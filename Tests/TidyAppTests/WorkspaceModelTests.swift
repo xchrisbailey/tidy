@@ -257,6 +257,7 @@ struct WorkspaceModelTests {
     #expect(model.phase == .idle)
     #expect(try await coordinator.historySnapshot().operations.isEmpty)
     model.windowDidOpen()
+    await model.waitUntilFinished()
     model.submit()
     await model.waitUntilFinished()
     #expect(model.result?.changed.count == 1)
@@ -282,6 +283,24 @@ struct WorkspaceModelTests {
     await model.waitUntilFinished()
     #expect(model.inventory?.items.map(\.name) == names)
     #expect(!model.isBusy)
+  }
+
+  @Test func reopeningWorkspaceRefreshesFilesAddedWhileClosed() async throws {
+    let fixture = try WorkspaceFixture(count: 1)
+    defer { fixture.remove() }
+    let model = WorkspaceModel(
+      coordinator: TaskCoordinator(bookmarkFile: fixture.bookmark),
+      modelIsReady: { true }, completion: { _, _, _ in sortResponse })
+    model.windowDidOpen()
+    model.inspect(fixture.folder, forWriting: true)
+    await model.waitUntilFinished()
+    model.closeWindow()
+    try Data("new arrival".utf8).write(to: fixture.folder.appendingPathComponent("new.txt"))
+    model.windowDidOpen()
+    #expect(!model.canSubmit)
+    await model.waitUntilFinished()
+    #expect(model.inventory?.candidateFiles.count == 2)
+    #expect(model.canSubmit)
   }
 }
 
