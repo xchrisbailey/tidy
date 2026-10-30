@@ -34,6 +34,7 @@ while IFS= read -r -d '' bundle; do
   cp -R "$bundle" "$app/Contents/Resources/"
 done < <(find "$bin_path" -maxdepth 1 -type d -name '*.bundle' -print0)
 cp -R Packaging/Notices "$app/Contents/Resources/"
+cp Packaging/Icons/Tidy.icns "$app/Contents/Resources/"
 if ! find "$app/Contents/Resources" -name '*.metallib' -print -quit | grep -q .; then
   echo 'Missing compiled Metal resources; candidate packaging stopped.' >&2
   exit 1
@@ -48,6 +49,7 @@ codesign --force --options runtime --timestamp --sign "$identity" "$service/Cont
 codesign --force --options runtime --timestamp --sign "$identity" "$service"
 codesign --force --options runtime --timestamp --sign "$identity" --entitlements Packaging/Tidy.entitlements "$app"
 codesign --verify --deep --strict --verbose=2 "$app"
+python3 scripts/check-app-icon.py "$app"
 codesign --display --verbose=4 "$app" 2> "$out/signature.txt"
 codesign --display --entitlements :- "$app" > "$out/entitlements.plist"
 cp docs/install.md "$payload/READ-ME-FIRST.md"
