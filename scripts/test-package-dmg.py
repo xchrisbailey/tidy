@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import plistlib
 import stat
 import subprocess
 import sys
@@ -62,6 +63,10 @@ def main():
     assert manifest["publicReleaseApproved"] is False
     image = directory / manifest["imageName"]
     assert image.suffix == ".dmg" and sha256(archive) == before
+    image_info = plistlib.loads(subprocess.check_output(["hdiutil", "imageinfo", "-plist", str(image)]))
+    assert image_info["Format"] == "UDZO"
+    assert image_info["Properties"]["Compressed"] is True
+    assert image_info["Properties"]["Encrypted"] is False
     subprocess.run(["hdiutil", "verify", str(image)], check=True, capture_output=True)
     subprocess.run(["codesign", "--verify", "--strict", str(image)], check=True, capture_output=True)
 

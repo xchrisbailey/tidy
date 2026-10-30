@@ -147,7 +147,11 @@ appropriate signing, hardened runtime and testing, and documents `notarytool` an
 `stapler`. The owner has authorized creating a dedicated local `tidy-notary`
 profile for Developer ID team `5U2B7W5F39`. The operator confirmed completion and
 the non-secret local record reports read-only authentication verified at
-`2026-10-30T03:43:16Z`. No artifact has been submitted. The ephemeral
+`2026-10-30T03:43:16Z`. The owner-approved DMG was accepted by Apple under submission
+`d4718e71-5198-40a6-a134-3ac7e532b3fb`, stapled and verified; both DMG and nested app
+Gatekeeper assessments report Notarized Developer ID. See the exact hashes and
+limits in [DMG verification](verification/dmg-distribution.md). No public release
+has been published. The ephemeral
 `.build/notarization/setup-profile.sh` walkthrough opens
 Apple Account's app-specific-password instructions, lets `notarytool` collect the
 password directly through its secure Terminal prompt, then verifies with a
@@ -161,19 +165,19 @@ upload exception; other submissions and all public distribution need approval.
 Profile configuration is independent of artifact submission and was performed
 locally by the operator (no secrets in git/chat). **Submission still requires
 separate owner authorization for a reviewed artifact.**
-These are exact command forms, not commands already executed; replace the profile
-and paths with explicit authorized values. Run from the candidate output directory:
+The following illustrates the direct-DMG workflow; use an explicitly authorized
+image and preserve its original. The completed candidate's exact commands/results
+are recorded separately above. Do not submit it again simply to repeat this example:
 
 ```sh
-xcrun notarytool submit Tidy-Unqualified-Development-arm64.zip --keychain-profile AUTHORIZED_PROFILE --wait --output-format json > notary-result.json
+xcrun notarytool submit APPROVED_IMAGE.dmg --keychain-profile tidy-notary --wait --output-format json > notary-result.json
 # Require status Accepted, retain submission ID and review notary log on failure.
-xcrun stapler staple 'Tidy-Unqualified-Development/Tidy Unqualified Development.app'
-xcrun stapler validate 'Tidy-Unqualified-Development/Tidy Unqualified Development.app'
-codesign --verify --deep --strict 'Tidy-Unqualified-Development/Tidy Unqualified Development.app'
-spctl --assess --type execute --verbose=4 'Tidy-Unqualified-Development/Tidy Unqualified Development.app'
-# Preserve the submitted ZIP/hash. Make a distinct archive of the stapled app:
-ditto -c -k --sequesterRsrc --keepParent Tidy-Unqualified-Development Tidy-Unqualified-Development-arm64-stapled.zip
-shasum -a 256 Tidy-Unqualified-Development-arm64-stapled.zip
+cp APPROVED_IMAGE.dmg APPROVED_IMAGE-stapled.dmg
+xcrun stapler staple APPROVED_IMAGE-stapled.dmg
+xcrun stapler validate APPROVED_IMAGE-stapled.dmg
+codesign --verify --strict APPROVED_IMAGE-stapled.dmg
+spctl --assess --type open --context context:primary-signature --verbose=4 APPROVED_IMAGE-stapled.dmg
+shasum -a 256 APPROVED_IMAGE.dmg APPROVED_IMAGE-stapled.dmg
 ```
 
 Stapling changes the artifact: retain both hashes; test the exact extracted stapled

@@ -39,16 +39,21 @@ files are skipped, not hydrated; real-provider nonhydration qualification is ope
 - [Installation, model storage, privacy, history and undo](docs/install.md)
 - [Blocked release prerequisites, naming investigation and operator commands](docs/distribution.md)
 - [Local #16 build/signing/verification record](docs/verification/ticket-16.md)
+- [Signed, notarized and stapled direct-download DMG evidence](docs/verification/dmg-distribution.md)
 
 Local optimized Developer ID candidate packaging is explicit and unqualified:
 
 ```sh
 bash scripts/package-candidate.sh --unqualified
+bash scripts/package-dmg.sh --unqualified /path/to/signed-candidate.zip
 ```
 
-This requires clean committed source and authorized signing access. It never
-uploads, notarizes or publishes. `scripts/package-release.sh` always refuses while
-qualification, naming/legal, notarization and clean-user gates remain unresolved.
+Building the app candidate requires clean committed source and authorized signing
+access; DMG packaging reuses an already signed candidate. These scripts never
+upload, notarize or publish. The owner-authorized candidate DMG notarization is
+recorded separately. Public promotion remains fail-closed pending owner review of
+the final artifact, accurate qualification claims and remaining distribution gates.
+This release targets DMG downloads through GitHub; any App Store release is later work.
 
 ## Verification boundaries
 
