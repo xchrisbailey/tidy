@@ -28,7 +28,9 @@ cp "$bin_path/TidyInspectionService" "$bin_path/TidyInspectionHelper" "$out/prod
 # injecting DYLD overrides or disabling hardened runtime library validation.
 # Stage the normally linked production service/parser first so test-only linker
 # paths cannot leak into their packaged code.
+# The UI integration suite imports internal app state; enable testability only here.
 swift build --configuration release --build-tests --disable-automatic-resolution \
+  -Xswiftc -enable-testing \
   -Xlinker -rpath -Xlinker "$platform/Library/Frameworks" \
   -Xlinker -rpath -Xlinker "$platform/usr/lib"
 app="$out/Tidy Unqualified Release Tests.app"

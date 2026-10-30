@@ -1,175 +1,154 @@
-import AppKit
 import SwiftUI
 import TidyCore
 
 struct HistoryView: View {
-  let coordinator: TaskCoordinator
-  @Environment(\.scenePhase) private var scenePhase
-  @State private var snapshot: HistorySnapshot?
-  @State private var recovery: [RecoveryOperation] = []
-  @State private var errorMessage: String?
-  @State private var isWorking = false
-  @State private var confirmsClear = false
-  @State private var undoActivity = HistoryUndo()
+  let model: WorkspaceModel
+  @State private var selectedTask: UUID?
+  @State private var selectedFile: UUID?
+  @State private var showsResults = false
 
-  private var isBusy: Bool { isWorking || undoActivity.isWorking }
+  private var tasks: [HistoryTask] { Array((model.history?.tasks ?? []).reversed()) }
+  private var task: HistoryTask? { tasks.first { $0.id == selectedTask } }
+  private var operation: FileOperation? { task?.operations.first { $0.id == selectedFile } }
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 16) {
-      HStack {
-        Text("Undo history").font(.title)
-        Spacer()
-        Button("Refresh") { refresh() }
-        Button("Clear History…", role: .destructive) { confirmsClear = true }
-          .disabled(snapshot?.operations.isEmpty != false)
-      }
-      .disabled(isBusy)
-      Text(
-        "Recovery records are kept on this Mac until you explicitly clear them. They contain paths and recovery information, not document excerpts. History is not a backup."
-      )
-      Text(
-        "Reopening checks actual file identities. Interrupted changes never resume automatically.")
-      if let snapshot {
-        Text(
-          "Recovery records: \(ByteCountFormatter.string(fromByteCount: snapshot.recordBytes, countStyle: .file)) (\(snapshot.recordBytes) bytes)"
-        )
-        .accessibilityIdentifier("history-storage")
-        Text("Excludes folder grants, model storage and lock bookkeeping.")
-          .font(.caption).foregroundStyle(.secondary)
-        if snapshot.operations.isEmpty {
-          ContentUnavailableView("No retained history", systemImage: "clock.arrow.circlepath")
+    GeometryReader { viewport in
+      VStack(spacing: 0) {
+        if tasks.isEmpty {
+          ContentUnavailableView(
+            "No retained history", systemImage: "clock.arrow.circlepath",
+            description: Text("Recorded changes appear here. History is not a backup.")
+          )
+          .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
-          ScrollView {
-            LazyVStack(alignment: .leading, spacing: 20) {
-              ForEach(snapshot.tasks.reversed()) { task in
-                VStack(alignment: .leading, spacing: 8) {
-                  HStack {
-                    Text("Task \(task.id.uuidString)").font(.headline)
-                    Spacer()
-                    Button("Undo Task") { undo(task.id, fileOnly: false) }
-                      .disabled(!task.operations.contains { canUndo($0.id) })
-                  }
-                  Text("\(task.operations.count) recorded files")
-                  ForEach(task.operations) { entry in
-                    VStack(alignment: .leading, spacing: 4) {
-                      if let report = recovery.first(where: { $0.id == entry.id }) {
-                        Text(report.status.rawValue.capitalized)
-                        Text(report.explanation)
-                      } else {
-                        Text(entry.state.explanation)
-                      }
-                      Text("Original: \(entry.originalPath)")
-                      Text("Resulting: \(entry.resultingPath)")
-                      Button("Undo File") { undo(entry.id, fileOnly: true) }
-                        .disabled(!canUndo(entry.id))
-                      if recovery.first(where: { $0.id == entry.id })?.options.contains(
-                        .cleanupFolders) == true
-                      {
-                        Button("Clean Up Empty Task Folders") { undo(entry.id, fileOnly: true) }
-                      }
-                    }
-                  }
-                  Divider()
-                }
-                .textSelection(.enabled)
-              }
+          HSplitView {
+            List(tasks, selection: $selectedTask) { task in
+              VStack(alignment: .leading, spacing: 6) {
+                Text(title(task)).font(.headline).lineLimit(1).truncationMode(.middle)
+                Text("\(task.operations.count) recorded files").font(.callout)
+                Text(summary(task)).font(.caption).foregroundStyle(.secondary)
+              }.padding(.vertical, 6).tag(task.id)
+            }.frame(minWidth: 210, idealWidth: 240, maxWidth: 310)
+            taskDetail.frame(minWidth: 300)
+          }.frame(minHeight: 0, maxHeight: .infinity)
+        }
+        WorkspaceActivity(model: model, showsResults: $showsResults)
+      }
+      .frame(width: viewport.size.width, height: viewport.size.height, alignment: .top)
+    }
+    .onChange(of: tasks.map(\.id), initial: true) { _, ids in
+      if let selectedTask, ids.contains(selectedTask) { return }
+      selectedTask = ids.first
+    }
+    .onChange(of: selectedTask) { _, _ in selectedFile = task?.operations.first?.id }
+    .sheet(isPresented: $showsResults) {
+      TaskResultsView(result: model.result, feedback: model.feedback)
+    }
+  }
+
+  @ViewBuilder private var taskDetail: some View {
+    if let task {
+      VStack(alignment: .leading, spacing: 0) {
+        VStack(alignment: .leading, spacing: 10) {
+          HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 4) {
+              Text(title(task)).font(.title2.weight(.semibold))
+              Text(summary(task)).foregroundStyle(.secondary)
             }
+            Spacer()
+            Button("Undo Task") { model.undo(task.id, fileOnly: false) }
+              .disabled(!model.canUndoTask(task.id))
           }
-          .disabled(isBusy)
+          if let path = task.operations.first?.selectedFolderPath {
+            Text(path).font(.callout).textSelection(.enabled).lineLimit(2).truncationMode(.middle)
+              .help(path)
+          }
+          Text("Recorded order · Date unavailable for these records")
+            .font(.caption).foregroundStyle(.secondary)
+        }.padding(20)
+        List(task.operations, selection: $selectedFile) { entry in
+          VStack(alignment: .leading, spacing: 4) {
+            Text(entry.originalName).lineLimit(1).truncationMode(.middle).help(entry.originalName)
+            Text(entry.state.explanation).font(.caption).foregroundStyle(.secondary)
+          }.padding(.vertical, 4).tag(entry.id)
+        }.frame(minHeight: 0, maxHeight: .infinity)
+        if let operation {
+          Divider()
+          ScrollView {
+            fileDetail(operation)
+          }.frame(maxHeight: 230)
         }
       }
-      if isWorking { ProgressView().controlSize(.small) }
-      if undoActivity.isWorking {
+    } else {
+      ContentUnavailableView("Select a task", systemImage: "clock.arrow.circlepath")
+    }
+  }
+
+  private func fileDetail(_ entry: FileOperation) -> some View {
+    VStack(alignment: .leading, spacing: 10) {
+      LabeledContent("Before") { Text(entry.originalPath).textSelection(.enabled) }
+      LabeledContent("After") { Text(entry.resultingPath).textSelection(.enabled) }
+      if let recovery = model.recovery.first(where: { $0.id == entry.id }) {
+        let needsAttention =
+          recovery.status == .uncertain
+          || (entry.state == .completed && !recovery.options.contains(.undoFile))
+        Label(
+          recovery.explanation,
+          systemImage: needsAttention ? "exclamationmark.triangle" : "info.circle"
+        )
+        .font(.callout).fixedSize(horizontal: false, vertical: true)
         HStack {
-          if let progress = undoActivity.progress {
-            ProgressView(value: Double(progress.processed), total: Double(max(progress.total, 1)))
-              .accessibilityLabel("Undo progress")
-              .accessibilityValue(
-                "\(progress.processed) of \(progress.total) checked; \(progress.undone) undone")
-          } else {
-            ProgressView().controlSize(.small)
+          Button("Undo File") { model.undo(entry.id, fileOnly: true) }
+            .disabled(!model.canUndo(entry.id))
+          if model.canCleanUp(entry.id) {
+            Button("Clean Up Empty Task Folders") { model.undo(entry.id, fileOnly: true) }
           }
-          Button(undoActivity.isCancelling ? "Cancelling…" : "Cancel Undo") {
-            undoActivity.cancel()
+          if recovery.options.contains(.grantAccess) {
+            Button("Grant Original Folder Access…") {
+              FolderPicker.choose(
+                for: model, forWriting: true,
+                initialFolder: URL(fileURLWithPath: entry.selectedFolderPath))
+            }.disabled(model.isBusy)
           }
-          .disabled(undoActivity.isCancelling)
-          .accessibilityIdentifier("history-cancel-undo")
         }
-      }
-      if let message = undoActivity.message {
-        Text(message).accessibilityIdentifier("history-undo-progress")
-      }
-      if let errorMessage {
-        Label(errorMessage, systemImage: "exclamationmark.triangle")
-          .foregroundStyle(.orange).textSelection(.enabled)
       }
       Text(
-        "Undo is best-effort: edits are preserved only when the same file can be identified. Occupied original locations are never overwritten. Grant write access to the recorded original folder before undoing if needed."
+        "Undo preserves edits only when the same file can be identified. Occupied locations are never overwritten."
       )
       .font(.caption).foregroundStyle(.secondary)
-      Button("Grant Original Folder Access…") { grantFolder() }
-        .disabled(isBusy)
-    }
-    .padding(24)
-    .frame(minWidth: 720, minHeight: 480)
-    .task { refresh() }
-    .onDisappear { undoActivity.cancel() }
-    .onChange(of: undoActivity.isWorking) { _, working in if !working { refresh() } }
-    .onChange(of: scenePhase) { _, phase in if phase == .active { refresh() } }
-    .alert("Permanently clear undo history?", isPresented: $confirmsClear) {
-      Button("Cancel", role: .cancel) {}
-      Button("Clear History and Lose Undo", role: .destructive) {
-        perform { try await coordinator.clearHistory(confirmingUndoLoss: true) }
+      DisclosureGroup("Record Details") {
+        Text("Task: \(entry.taskID.uuidString)").font(.caption.monospaced()).textSelection(.enabled)
+        if let bytes = model.history?.recordBytes {
+          Text(
+            "Retained recovery records: \(ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)) (\(bytes) bytes)"
+          )
+          .font(.caption).accessibilityIdentifier("history-storage")
+          Text("Excludes folder grants, model storage and lock bookkeeping.").font(.caption)
+            .foregroundStyle(.secondary)
+        }
       }
-    } message: {
-      Text(
-        "Tidy will permanently forget all retained task and file recovery records, including interrupted changes. You will no longer be able to undo those changes with Tidy. This does not reverse changes or move, edit, or delete user files. Folder grants and downloaded models are kept."
-      )
+    }.padding(20)
+  }
+
+  private func title(_ task: HistoryTask) -> String {
+    guard let path = task.operations.first?.selectedFolderPath else { return "Recorded changes" }
+    let name = URL(fileURLWithPath: path).lastPathComponent
+    return "Changes in \(name.isEmpty ? path : name)"
+  }
+
+  private func summary(_ task: HistoryTask) -> String {
+    let undone = task.operations.filter { $0.state == .undone }.count
+    let changed = task.operations.filter { $0.state == .completed }.count
+    let interrupted = task.operations.filter { $0.state == .intent || $0.state == .undoIntent }
+      .count
+    if interrupted > 0 { return "\(interrupted) interrupted · check actual state" }
+    if model.recovery.contains(where: {
+      $0.operation.taskID == task.id
+        && ($0.status == .uncertain || $0.blockingTaskID != nil
+          || ($0.operation.state == .completed && !$0.options.contains(.undoFile)))
+    }) {
+      return "Needs attention · \(task.operations.count) recorded files"
     }
-  }
-
-  private func refresh() { perform {} }
-
-  private func canUndo(_ id: UUID) -> Bool {
-    recovery.first(where: { $0.id == id })?.options.contains(.undoFile) == true
-  }
-
-  private func undo(_ id: UUID, fileOnly: Bool) {
-    guard !isBusy else { return }
-    undoActivity.start(id, fileOnly: fileOnly, coordinator: coordinator)
-  }
-
-  private func grantFolder() {
-    let panel = NSOpenPanel()
-    panel.title = "Select the recorded original folder"
-    panel.prompt = "Grant Write Access"
-    panel.message = "Authorize undo in this folder. Granting access does not undo any changes."
-    panel.canChooseFiles = false
-    panel.canChooseDirectories = true
-    panel.allowsMultipleSelection = false
-    panel.canCreateDirectories = false
-    panel.resolvesAliases = false
-    panel.treatsFilePackagesAsDirectories = false
-    if panel.runModal() == .OK, let folder = panel.url {
-      perform { _ = try await coordinator.selectFolderForWriting(folder) }
-    }
-  }
-
-  private func perform(_ action: @escaping () async throws -> Void) {
-    guard !isBusy else { return }
-    isWorking = true
-    errorMessage = nil
-    Task {
-      defer { isWorking = false }
-      do { try await action() } catch { errorMessage = error.localizedDescription }
-      do {
-        recovery = try await coordinator.recoveryReport()
-        snapshot = try await coordinator.historySnapshot()
-      } catch {
-        snapshot = nil
-        recovery = []
-        errorMessage = error.localizedDescription
-      }
-    }
+    return "\(changed) recorded changes · \(undone) undone"
   }
 }
