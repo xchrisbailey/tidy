@@ -75,6 +75,8 @@ real temporary files and bookmarks. Model lifecycle/runtime and packaged inspect
 smokes supplement it. They do not establish native GUI behavior, real permission
 revocation, app-process relaunch, hardware support or a clean-user installation.
 See the [verification records](docs/verification/) for evidence and limitations.
+The [v1 executable-spec follow-up](docs/verification/v1-spec-completion.md) records
+the latest request-authority, fresh-inventory and undo-boundary corrections for #1/#19.
 
 `scripts/release-tests.sh` runs the same complete optimized coordinator suite in a
 signed application test host with production XPC/parser containment, then the full
