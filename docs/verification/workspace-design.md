@@ -227,6 +227,8 @@ Remaining operator checks before merge:
    Transparency and Increase Contrast, verifying live text/control legibility and
    composited toolbar/sidebar behavior. Native appearance tests are not this check.
 
-**Merge is held** until the remaining operator checks pass or the owner explicitly
-decides how to track/defer them. The focused pass does not silently close #17 or
-authorize notarization or release publication.
+The owner subsequently approved tracking the remaining operator checks as follow-up
+work and confirmed the rest looks good. They are explicitly deferred to
+[#18](https://github.com/xchrisbailey/tidy/issues/18), not recorded as passed. This
+removes the local integration hold for #17; it does not authorize notarization or
+release publication, or close the existing hardware/distribution qualification work.
