@@ -34,3 +34,17 @@ clearing in an isolated profile, formal accessibility, independent naming review
 minimum OS/hardware/pressure, notarization/clean-user Gatekeeper and name/legal/
 hosting approval remain separate open release gates. Public release is blocked;
 no issue is closed solely from this partial native walkthrough.
+
+## Owner decision: accept the walkthrough for release preparation
+
+The owner explicitly deferred the three skipped formal checks (undo cancellation,
+native offline operation and diagnostic export) and does not require formal
+reruns. They will exercise the app hands-on and address discovered defects before
+public release. These checks are **non-blocking for continued release preparation**;
+do not request another wizard run for them unless the owner asks or reports a bug.
+
+The evidence remains 12 observed PASS and three SKIP with an owner-approved
+deferral, not 15 executed passes. The local report records this disposition while
+retaining original observations and attempt history. This workflow decision does
+not itself approve public distribution or establish the separate untested
+hardware, provider, legal or notarization facts.
