@@ -11,10 +11,13 @@ The current build is native arm64 (Apple silicon), targets macOS 14+, and
 provisionally enables model setup from 16 GB unified memory. These are build/runtime
 bounds, **not qualified minimum requirements**. Intel is not built. The observed
 M4 Max / 36 GB / macOS 27.0.1 results do not qualify that Mac, macOS 14, or 16 GB.
-Independent quality, native GUI, recovery repeatability and hardware gates remain.
+Independent quality, remaining provider/clean-user checks and hardware gates remain.
+Recorded native observations and owner-deferred formal checks are tracked in
+[native acceptance results](verification/native-acceptance-results.md).
 
 The intended app is free and account-free: no payment, subscription, trial limit,
-App Store path or cloud inference. First model setup needs an internet connection
+App Store path for this release or cloud inference. A later App Store release is
+separate work. First model setup needs an internet connection
 and explicit download consent, but no Hugging Face account or token.
 
 ## Install a future approved direct download
@@ -22,13 +25,14 @@ and explicit download consent, but no Hugging Face account or token.
 These steps must be verified on the **final notarized, qualified artifact** before
 publication. They are not completed acceptance checks for today's candidate.
 
-1. Obtain the ZIP and its independently published SHA-256 from the approved HTTPS
-   distribution location (not selected yet). Compare with `shasum -a 256 PATH.zip`.
-2. Expand it in Finder, read its bundled warnings, then copy the app to Applications
+1. Obtain the DMG and its independently published SHA-256 from the future approved
+   GitHub Releases/project-page link. Compare with `shasum -a 256 PATH.dmg`.
+2. Open the DMG in Finder, read its bundled warnings, then drag the app to Applications
    in a clean test user. Quit other Tidy builds first. The candidate has the explicit
    name **Tidy Unqualified Development.app**; it is not a release.
 3. Open from Applications. Verify the expected identified developer and ordinary
-   Gatekeeper behavior. The candidate is not notarized and may be blocked. **Stop
+   Gatekeeper behavior. Check the exact artifact's recorded notarization status; a
+   Developer ID signature alone is not sufficient. If launch is blocked, **stop
    and record the failure; do not remove quarantine, disable Gatekeeper, or use an
    “Open Anyway” bypass as installation evidence.**
 4. Choose **Local Model Setup…**. Review the size and consent before Download / Resume.
@@ -50,7 +54,7 @@ an isolated install**. Do not replace a working installation or delete its conta
 
 Current candidate: `mlx-community/Qwen3-4B-Instruct-2507-4bit`, revision
 `50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b`, Apache-2.0. Allowlisted download:
-**2,278,969,697 bytes (~2.28 GB / 2.12 GiB)**, separate from the app ZIP. Setup
+**2,278,969,697 bytes (~2.28 GB / 2.12 GiB)**, separate from the DMG/app. Setup
 conservatively reserves `3 × download + 512 MiB` = **7,373,780,003 bytes (~7.37 GB)**
 for temporary copies and safety margin. Old versions, app, history and other disk
 use are additional. Storage is checked again before transfers, not guaranteed forever.
@@ -104,6 +108,8 @@ undo. Grant Original Folder Access… can restore authorization, not missing byt
 Relaunch reconciles actual files; interrupted mutations never automatically resume.
 Only empty task-created folders may be cleaned up. Back up before organizing.
 
-The intermittent recovery `.busy` observed in qualification is not diagnosed or
-fixed. Do not claim all safety checks passed or try mutation retries to hide it.
+Two reproduced journal descriptor/lock defects were fixed and repeatedly tested;
+the original uninstrumented intermittent `.busy` failure cannot be uniquely
+attributed. See [recovery safety evidence](verification/qualification-v1-recovery-safety.md).
+Do not claim universal safety qualification or retry mutations to hide conflicts.
 See [distribution gates](distribution.md) and [corrective evidence](verification/qualification-v1-corrective-results.md).

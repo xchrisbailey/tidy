@@ -3,7 +3,45 @@
 **PUBLIC RELEASE BLOCKED. No hardware qualified.** #16 supplies local candidate
 packaging, not a public release. #15's corrected synthetic agent-scored quality
 and 100-file passes are not independent human/hardware/safety qualification.
-Keep both issues and parent #1 open. No upload/push/publish occurs in these scripts.
+Keep both issues and parent #1 open. Packaging scripts do not upload or publish.
+
+## Current distribution decision
+
+The owner confirmed a downloadable **DMG through GitHub Releases and a future
+project-page link**, not the Mac App Store for this release. A possible later
+App Store release is separate work. Developer ID notarization is Apple's security
+scan for direct distribution; it does not create an App Store listing.
+
+After the distinction was explained, the owner explicitly approved packaging the
+tested candidate, submitting it to Apple with `tidy-notary`, and stapling/verifying
+the result. This authorization is limited to that internal candidate workflow:
+it is not permission to publish a GitHub release or declare unresolved product,
+hardware or legal facts qualified. Notarization results must be recorded per
+artifact, rather than inferred from the credential check.
+
+## DMG from an existing tested signed candidate
+
+```sh
+bash scripts/package-dmg.sh --unqualified .build/direct-download/Tidy-Unqualified-b422b36-arm64.zip
+python3 scripts/test-package-dmg.py .build/direct-download/Tidy-Unqualified-b422b36-arm64.zip
+```
+
+The packaging script validates the source archive before extraction, verifies the
+signed app, and creates a read-only compressed UDZO/HFS+ image with an Applications
+link, warning/readme and provenance. It signs only the new image; the app and
+source ZIP remain byte-identical. No model weights are included. It never uploads,
+installs, launches or publishes anything. The test mounts the image read-only and
+compares every app file/link against the signed source, then detaches it. It also
+checks rejection of unsafe archives and release-gate override flags.
+
+Use the exact output image for the separately authorized notarytool submission.
+Following [Apple's outermost-container guidance](https://developer.apple.com/forums/thread/125512),
+sign inside-out, notarize the DMG and staple the DMG. Its ticket covers the image
+and nested app. A command-line `hdiutil` mount alone does not prove first-launch
+Gatekeeper ticket ingestion or an offline clean-user install; the final image
+still needs normal Finder/Gatekeeper installation checks. Preserve both hashes
+before/after stapling. No notarization credentials are packaged or read by these
+scripts. `package-release.sh` remains fail-closed for public promotion.
 
 ## Naming investigation (2026-10-29)
 
@@ -117,7 +155,8 @@ read-only history request. Only non-secret profile/team/verification metadata is
 written to ignored local `profile.env`. No credentials go into chat, git or the
 wizard's environment file. No keychain credential discovery, secret extraction
 or automated Apple Account setup is permitted.
-No unqualified artifact is to be uploaded by this implementation.
+The owner-authorized candidate notarization workflow above is the only permitted
+upload exception; other submissions and all public distribution need approval.
 
 Profile configuration is independent of artifact submission and was performed
 locally by the operator (no secrets in git/chat). **Submission still requires
