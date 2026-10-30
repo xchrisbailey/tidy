@@ -5,9 +5,10 @@ folder; local inference prepares a validated plan. Clear requests execute withou
 preview, ambiguous requests need clarification, and changes to more than 100 files
 require confirmation. Persistent undo is best-effort, not a backup.
 
-**Experimental beta preparation; no public app download yet.** No hardware is
-formally qualified. The owner selected an experimental beta rather than a qualified
-v1, with unresolved checks disclosed instead of marked passed. See the
+**Experimental beta:** see [GitHub Releases](https://github.com/xchrisbailey/tidy/releases)
+for download availability and checksums. No hardware is formally qualified. The
+owner selected an experimental beta rather than a qualified v1, with unresolved
+checks disclosed instead of marked passed. See the
 [beta decisions and limitations](docs/releases/v0.1.0-beta.1.md) and
 [qualification evidence](docs/verification/ticket-15.md).
 

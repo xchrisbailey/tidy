@@ -2,9 +2,12 @@
 
 **Stable v1 remains blocked; no hardware is formally qualified.** The owner selected
 an experimental beta, explicitly deferring unresolved qualification rather than
-claiming it passed, and selected MIT for Tidy's source. The current beta is not
-published. Its exact artifact, Apple submission, final install disposition and
-working-name risk still require approval. See [beta decisions](releases/v0.1.0-beta.1.md).
+claiming it passed, and selected MIT for Tidy's source. The owner approved the
+specific beta image and its stapled derivative for publication after Accepted
+notarization and artifact checks, retained Tidy with naming risk unresolved, and
+deferred clean-user GUI installation for this beta. See
+[beta decisions](releases/v0.1.0-beta.1.md) and the
+[Accepted receipt and hashes](verification/experimental-beta-1.md).
 Synthetic agent-scored quality and 100-file passes are not independent
 human/hardware/safety qualification. Packaging scripts do not upload or publish.
 

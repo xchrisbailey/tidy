@@ -62,7 +62,25 @@ results are in `.build/beta-verification/`; the initial superseded candidate and
 provenance regression logs are retained separately.
 
 The owner deferred #18 until after release and explicitly selected beta caveats
-instead of claiming full qualification. Working-name risk, permission for this
-image's Apple submission/public prerelease, and final-install disposition still
-need decisions. Any stapled image gets a separate final hash; do not upload the
-unsigned-approval/nonnotarized candidate simply because the PR merges.
+instead of claiming full qualification. They subsequently approved merging PR #20,
+this exact image's Apple submission and public prerelease of its stapled derivative
+only after Accepted notarization and artifact checks. They chose to retain Tidy
+with naming clearance unresolved and defer the clean-user GUI install for this
+beta. These are dispositions, not verification passes. The stapled image will have
+a separate final hash; merging alone does not authorize an unnotarized download.
+
+## Approved Apple submission and final artifact
+
+Apple accepted submission `f1536e2f-958b-453f-87c7-c706dbd504cd`; the downloaded
+notary log reports zero issues. The original submitted image remains unchanged.
+A separate copy was stapled, validated and checked for image integrity and strict
+signatures. Both DMG-open and mounted-app-execute Gatekeeper assessments report
+`Notarized Developer ID`. Every signed app file/link matches the approved candidate.
+No app was installed or launched by these checks.
+
+Final public-artifact candidate: `Tidy-0.1.0-beta.1-arm64.dmg`, 15,007,173 bytes.
+SHA-256: `84fd9283890a23423b1ff3cccae7a7fe185696138c6cc71b45c9f46328f61797`.
+Retained in `.build/beta-publication/` with `SHA256SUMS`, Apple log, Gatekeeper
+outputs and machine-readable receipt. Publication remains conditional on the
+recorded approval and exact-artifact upload verification; the unnotarized ZIP
+is not a public release asset.

@@ -1,7 +1,8 @@
 # Tidy: experimental installation and setup
 
-**No public app download yet; no hardware is formally qualified.** The owner selected
-an experimental beta, not a qualified v1. See [beta limitations](releases/v0.1.0-beta.1.md).
+**Experimental beta; no hardware is formally qualified.** See
+[GitHub Releases](https://github.com/xchrisbailey/tidy/releases) for availability.
+The owner selected a beta, not a qualified v1. See [beta limitations](releases/v0.1.0-beta.1.md).
 Signing/notarization does not establish safety or hardware support. Use disposable,
 backed-up test files, not your real Downloads/Desktop or personal sync data.
 
