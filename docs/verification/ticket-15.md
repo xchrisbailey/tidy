@@ -1,5 +1,25 @@
 # #15 — local qualification, not release approval
 
+## Corrective follow-up, 2026-10-29
+
+The user explicitly authorized fixing naming reliability and complete-plan context
+architecture while retaining the corpus, rubric, requests, thresholds and model.
+The final unchanged 32-case run now passes agent-scored naming gates:
+**21/22 usable proposals (95.45%)**, **21/24 useful cryptic files (87.50%)**.
+The complete 100-file task finished in **6.46154 s including verified loading**;
+the separate 12-text task finished all 12 changes in **9.63572 s** excluding load.
+All passed original-byte checks and reopened undo. One OCR-derived proposed name
+remains unusable and two eligible OCR files abstained; neither is hidden from the
+denominators. See [complete corrective evidence](qualification-v1-corrective-results.md)
+for the architecture, red/green tests, all failed intermediate runs, complete
+per-case results, memory/response measurements and latest checks.
+
+**#15 remains open. Supported hardware remains NONE qualified.** Passing these
+synthetic agent-scored benchmarks does not complete native/manual, independent
+human, real-provider, recovery-repeatability, minimum-hardware or release gates.
+The original failed baseline below is retained as historical evidence, not the
+latest naming/performance result.
+
 2026-10-28–29. Work started clean on `ticket/15-qualification` at requested
 `2c10efd8f82ebcc60f40faea8acc3b1b6c2c2bce` (`integration/tidy-v1`).
 **Keep #15 open. Supported hardware: NONE qualified.** The tested machine below
