@@ -3,6 +3,127 @@ import Testing
 import TidyCore
 
 struct MetadataIntentTests {
+  @Test(arguments: ["lowercase", "lower case", "lower-case"])
+  func supportedRenamePhrasesStillRetainSeparateActionScopes(phrase: String) async throws {
+    let fixture = try LanguageFixture()
+    defer { fixture.remove() }
+    try fixture.write("Report.pdf")
+    try fixture.write("Notes.txt")
+    let coordinator = TaskCoordinator(bookmarkFile: fixture.bookmark)
+    _ = try await coordinator.selectFolderForWriting(fixture.folder)
+    let request = "Sort PDF files by type and \(phrase) TXT filenames"
+    let response = try metadataResponse(
+      request: request,
+      rename: [["kind": "lowercase", "evidence": request, "value": "", "from": ""]],
+      decisions: [],
+      selection: ["extensions": ["pdf", "txt"], "nameContains": "", "evidence": request],
+      clauses: [["text": request, "effect": "sort+rename+selection"]]
+    )
+    .replacingOccurrences(of: "\"files\":[]", with: "\"files\":\"all\"")
+    await #expect(throws: PlanningError.invalidResponse) {
+      try await coordinator.planTask(request: request, model: { _, _, _ in response })
+    }
+    #expect(try await coordinator.undoHistory().isEmpty)
+  }
+
+  @Test(arguments: [
+    "Sort all files by type and give PDFs readable names from contents",
+    "Give PDFs readable names from contents and sort all files by type",
+    "Sort PDF files by type and give TXT files readable names from contents",
+  ])
+  func actionSpecificScopesCannotBecomeOneGlobalSelection(request: String) async throws {
+    let fixture = try LanguageFixture()
+    defer { fixture.remove() }
+    try fixture.write("Report.pdf")
+    try Data("Private unrelated content must not reach inference.".utf8)
+      .write(to: fixture.folder.appendingPathComponent("Notes.txt"))
+    let coordinator = TaskCoordinator(bookmarkFile: fixture.bookmark)
+    _ = try await coordinator.selectFolderForWriting(fixture.folder)
+    let extensions = request.contains("TXT") ? ["pdf", "txt"] : ["pdf"]
+    let response = try metadataResponse(
+      request: request,
+      rename: [["kind": "content", "evidence": request, "value": "", "from": ""]],
+      decisions: [],
+      selection: ["extensions": extensions, "nameContains": "", "evidence": request],
+      clauses: [["text": request, "effect": "sort+rename+selection"]]
+    )
+    .replacingOccurrences(of: "\"files\":[]", with: "\"files\":\"all\"")
+    await #expect(throws: PlanningError.invalidResponse) {
+      try await coordinator.planTask(request: request) { _, prompt, _ in
+        #expect(!prompt.contains("Private unrelated content"))
+        return response
+      }
+    }
+    #expect(try await coordinator.undoHistory().isEmpty)
+    #expect(
+      Set(try FileManager.default.contentsOfDirectory(atPath: fixture.folder.path)) == [
+        "Report.pdf", "Notes.txt",
+      ])
+  }
+
+  @Test(arguments: [false, true], ["and keep", "keeping", "while keeping"])
+  func allFilesSortDoesNotTreatPreservedPDFNamesAsSelection(
+    narrowedReplacement: Bool, preservation: String
+  ) async throws {
+    let fixture = try LanguageFixture()
+    defer { fixture.remove() }
+    try fixture.write("Report.pdf")
+    try fixture.write("Notes.txt")
+    let coordinator = TaskCoordinator(bookmarkFile: fixture.bookmark)
+    _ = try await coordinator.selectFolderForWriting(fixture.folder)
+    let request = "Sort all files by type \(preservation) PDF filenames unchanged"
+    let correct =
+      #"{"status":"plan","message":"","clauses":[{"text":"Sort all files by type ","effect":"sort"},{"text":"and keep PDF filenames unchanged","effect":"constraint"}],"sort":{"kind":"type","evidence":"type","value":""},"rename":[],"selection":{"extensions":[],"nameContains":"","evidence":""},"files":"all"}"#
+      .replacingOccurrences(of: "and keep", with: preservation)
+    let narrowed =
+      #"{"status":"plan","message":"","clauses":[{"text":"Sort all files by type and keep PDF filenames unchanged","effect":"sort+selection"}],"sort":{"kind":"type","evidence":"type","value":""},"rename":[],"selection":{"extensions":["pdf"],"nameContains":"","evidence":"PDF"},"files":"all"}"#
+      .replacingOccurrences(of: "and keep", with: preservation)
+    let responses = ResponseSequence([correct, narrowedReplacement ? narrowed : correct])
+    let outcome = try await coordinator.planTask(request: request) { _, _, _ in
+      await responses.next()
+    }
+    guard case .plan(let plan) = outcome else {
+      Issue.record("Expected complete all-files sort")
+      return
+    }
+    #expect(await responses.count == 1)
+    #expect(Set(plan.changes.map(\.originalName)) == ["Report.pdf", "Notes.txt"])
+    #expect(Set(plan.changes.map(\.destinationName)) == ["Report.pdf", "Notes.txt"])
+    #expect(try await coordinator.execute(plan).changed.count == 2)
+    try await TaskCoordinator(bookmarkFile: fixture.bookmark).undoTask(plan.id)
+    #expect(
+      try Data(contentsOf: fixture.folder.appendingPathComponent("Report.pdf"))
+        == Data("fixture".utf8))
+    #expect(
+      try Data(contentsOf: fixture.folder.appendingPathComponent("Notes.txt"))
+        == Data("fixture".utf8))
+  }
+
+  @Test(arguments: [
+    "Sort all files by type and keep PDF filenames unchanged",
+    "Sort files by type with PDF filenames unchanged",
+  ])
+  func preservationReferenceCannotAuthorizeNarrowedAllFilesSort(request: String) async throws {
+    let fixture = try LanguageFixture()
+    defer { fixture.remove() }
+    try fixture.write("Report.pdf")
+    try fixture.write("Notes.txt")
+    let coordinator = TaskCoordinator(bookmarkFile: fixture.bookmark)
+    _ = try await coordinator.selectFolderForWriting(fixture.folder)
+    let narrowed =
+      #"{"status":"plan","message":"","clauses":[{"text":"Sort all files by type and keep PDF filenames unchanged","effect":"sort+selection"}],"sort":{"kind":"type","evidence":"type","value":""},"rename":[],"selection":{"extensions":["pdf"],"nameContains":"","evidence":"PDF"},"files":"all"}"#
+      .replacingOccurrences(
+        of: "Sort all files by type and keep PDF filenames unchanged", with: request)
+    await #expect(throws: PlanningError.invalidResponse) {
+      try await coordinator.planTask(request: request, model: { _, _, _ in narrowed })
+    }
+    #expect(try await coordinator.undoHistory().isEmpty)
+    #expect(
+      Set(try FileManager.default.contentsOfDirectory(atPath: fixture.folder.path)) == [
+        "Report.pdf", "Notes.txt",
+      ])
+  }
+
   @Test(arguments: ["beforeExecution", "beforeMove", "undo"])
   func caseOnlyNamingNeverOverwritesAnUnrelatedReplacement(stage: String) async throws {
     let fixture = try LanguageFixture()
@@ -171,13 +292,18 @@ struct MetadataIntentTests {
     #expect(try FileManager.default.contentsOfDirectory(atPath: fixture.folder.path).count == 4)
   }
 
-  @Test func replacementRestoresExplicitNameAndExtensionRestrictionsBeforeMutation() async throws {
+  @Test(arguments: [false, true])
+  func replacementRestoresExplicitNameAndExtensionRestrictionsBeforeMutation(
+    preservingOtherType: Bool
+  ) async throws {
     let fixture = try LanguageFixture()
     defer { fixture.remove() }
-    for name in ["Report.txt", "other.txt", "Report.md"] { try fixture.write(name) }
+    for name in ["Report.txt", "other.txt", "Report.md", "Report.pdf"] { try fixture.write(name) }
     let coordinator = TaskCoordinator(bookmarkFile: fixture.bookmark)
     _ = try await coordinator.selectFolderForWriting(fixture.folder)
-    let request = "Lowercase TXT filenames containing ‘Report’"
+    let request =
+      "Lowercase TXT filenames containing ‘Report’"
+      + (preservingOtherType ? " and keep PDF filenames unchanged" : "")
     let omitted = try metadataResponse(
       request: request, sort: "none",
       rename: [["kind": "lowercase", "evidence": request, "value": "", "from": ""]],

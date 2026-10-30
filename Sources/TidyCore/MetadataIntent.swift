@@ -20,7 +20,7 @@ enum IntentViolation: String, Error {
   case renameLiteral =
     "A prefix/suffix rule needs its action word AND the exact quoted literal in its evidence. Copy the user's literal including case and whitespace; from must be empty."
   case selection =
-    "Preserve every explicit extension and quoted name-substring restriction from the request; never omit or broaden one. Exact-file selection is not supported: ask for clarification instead of using a substring filter. Selection evidence must quote an explicitly requested extension or exact quoted name substring, never a generic word like files. If extensions and nameContains are both empty, evidence MUST also be empty: {\"extensions\":[],\"nameContains\":\"\",\"evidence\":\"\"}, and REMOVE selection from clause effects (use rename, not rename+selection, for content naming without a filter). Do not infer a filter from inventory. A clause declaring a filter must include the selection effect."
+    "Bind selection to positive action scope, not mentions inside preservation constraints. Never narrow an all-files action. One global selection must match every requested action; ask for clarification if action scopes differ. Preserve every explicit extension and quoted name-substring restriction; never omit or broaden one. Exact-file selection is not supported: ask for clarification instead of using a substring filter. Selection evidence must quote an explicitly requested extension or exact quoted name substring, never a generic word like files. If extensions and nameContains are both empty, evidence MUST also be empty: {\"extensions\":[],\"nameContains\":\"\",\"evidence\":\"\"}, and REMOVE selection from clause effects (use rename, not rename+selection, for content naming without a filter). Do not infer a filter from inventory. A clause declaring a filter must include the selection effect."
   case clauses =
     "Each clause must correspond to an actual declared rule or a preservation constraint; do not hide unsupported actions."
 }
@@ -233,53 +233,46 @@ struct MetadataIntent: Decodable {
     else { throw IntentViolation.selection }
     // Optional model fields cannot erase a recognizable restriction in the user's request.
     // Check authority before expansion or content inspection treats an empty filter as all files.
-    let instruction = metadataInstructionText(request)
-    let knownExtensions = [
-      "pdf", "txt", "md", "markdown", "rtf", "doc", "docx", "csv", "tsv", "xls", "xlsx",
-      "ppt", "pptx", "jpg", "jpeg", "png", "gif", "heic", "tiff", "svg", "webp",
-      "mp3", "wav", "m4a", "mp4", "mov", "zip", "json", "xml", "html",
-    ]
-    var requestedExtensions = Set(
-      knownExtensions.filter {
-        containsWord(instruction, [$0, $0 + "s"])
-      })
-    let dotted = try NSRegularExpression(pattern: #"(?<![a-z0-9])\.([a-z0-9]{1,10})\b"#)
-    for match in dotted.matches(
-      in: instruction, range: NSRange(instruction.startIndex..., in: instruction))
-    {
-      if let range = Range(match.range(at: 1), in: instruction) {
-        requestedExtensions.insert(String(instruction[range]))
+    let parts = try selectionClauses(request)
+    let actionClauses = parts.actions
+    let selectionRequest = actionClauses.joined(separator: " ")
+    var boundScope: SelectionRestrictions?
+    for clause in actionClauses {
+      let parsed = try selectionRestrictions(in: clause)
+      let words = metadataInstructionText(clause)
+      // Unrecognized preservation phrasing is not a positive selector either. Ask for
+      // clarification rather than using an extension mention to narrow a generic action.
+      if !parsed.isEmpty
+        && containsWord(
+          words, ["unchanged", "keep", "keeping", "preserve", "preserving", "retain", "retaining"])
+      {
+        throw IntentViolation.selection
       }
-    }
-    let quotedExtension = try NSRegularExpression(
-      pattern: #"(?i)[\"“‘']\.([a-z0-9]{1,10})[\"”’']\s+(?:files?|documents?)\b"#)
-    for match in quotedExtension.matches(
-      in: request, range: NSRange(request.startIndex..., in: request))
-    {
-      if let range = Range(match.range(at: 1), in: request) {
-        requestedExtensions.insert(request[range].lowercased())
-      }
-    }
-    if !requestedExtensions.isEmpty,
-      Set(selection.extensions.map { $0.lowercased() }) != requestedExtensions
-    {
-      throw IntentViolation.selection
-    }
-    let nameFilter = try NSRegularExpression(
-      pattern:
-        #"(?i)\b(?:names?|filenames?|files?)\s+(?:that\s+)?(?:contain(?:s|ing)?|include(?:s|ing)?|matching)\s+[\"“‘']([^\"”’']+)[\"”’']"#
-    )
-    var nameRestrictions = Set<String>()
-    for match in nameFilter.matches(in: request, range: NSRange(request.startIndex..., in: request))
-    {
-      guard let range = Range(match.range(at: 1), in: request),
-        selection.nameContains == String(request[range])
+      let allFiles =
+        words.range(
+          of: #"\b(?:all|every|each)\s+(?:the\s+)?(?:files?|filenames?|names?|documents?)\b"#,
+          options: .regularExpression) != nil
+      guard !(allFiles && !parsed.isEmpty),
+        parsed.isEmpty
+          || !containsWord(words, ["except", "excluding", "exclude", "without", "not", "never"])
       else { throw IntentViolation.selection }
-      nameRestrictions.insert(String(request[range]))
+      let explicitScope =
+        !parsed.isEmpty || allFiles || containsWord(words, ["files", "documents"])
+      let scope = explicitScope ? parsed : boundScope ?? parsed
+      if let boundScope, scope != boundScope { throw IntentViolation.selection }
+      boundScope = scope
     }
+    let requested = boundScope ?? SelectionRestrictions()
+    let nameRestrictions = requested.names
+    guard Set(selection.extensions.map { $0.lowercased() }) == requested.extensions,
+      nameRestrictions == (selection.nameContains.isEmpty ? [] : [selection.nameContains])
+    else { throw IntentViolation.selection }
+    try validatePreservationConstraints(
+      parts.constraints, hasSort: sort.kind != "none", hasRename: !rename.isEmpty,
+      selectedExtensions: requested.extensions)
     // Exact-file selection is not representable by the substring filter. Require clarification
     // instead of treating a quoted file name as authority over its neighbours.
-    if request.range(
+    if selectionRequest.range(
       of: #"(?i)\b(?:file|files?\s+(?:named|called))\s+[\"“‘'][^\"”’']+[\"”’']"#,
       options: .regularExpression) != nil
     {
@@ -287,10 +280,11 @@ struct MetadataIntent: Decodable {
     }
     let quotedFile = try NSRegularExpression(
       pattern: #"[\"“‘']([^\"”’']+\.[a-zA-Z0-9]{1,10})[\"”’']"#)
-    for match in quotedFile.matches(in: request, range: NSRange(request.startIndex..., in: request))
+    for match in quotedFile.matches(
+      in: selectionRequest, range: NSRange(selectionRequest.startIndex..., in: selectionRequest))
     {
-      guard let range = Range(match.range(at: 1), in: request) else { continue }
-      let literal = String(request[range])
+      guard let range = Range(match.range(at: 1), in: selectionRequest) else { continue }
+      let literal = String(selectionRequest[range])
       let isRuleParameter =
         rename.contains {
           ["prefix", "suffix"].contains($0.kind) && $0.value == literal
@@ -337,6 +331,123 @@ struct MetadataIntent: Decodable {
         }
       })
     else { throw IntentViolation.clauses }
+  }
+}
+
+private struct SelectionRestrictions: Equatable {
+  var extensions: Set<String> = []
+  var names: Set<String> = []
+  var isEmpty: Bool { extensions.isEmpty && names.isEmpty }
+}
+
+private func selectionRestrictions(in clause: String) throws -> SelectionRestrictions {
+  let instruction = metadataInstructionText(clause)
+  let knownExtensions = [
+    "pdf", "txt", "md", "markdown", "rtf", "doc", "docx", "csv", "tsv", "xls", "xlsx",
+    "ppt", "pptx", "jpg", "jpeg", "png", "gif", "heic", "tiff", "svg", "webp",
+    "mp3", "wav", "m4a", "mp4", "mov", "zip", "json", "xml", "html",
+  ]
+  var result = SelectionRestrictions(
+    extensions: Set(
+      knownExtensions.filter {
+        containsWord(instruction, [$0, $0 + "s"])
+      }))
+  let dotted = try NSRegularExpression(pattern: #"(?<![a-z0-9])\.([a-z0-9]{1,10})\b"#)
+  for match in dotted.matches(
+    in: instruction, range: NSRange(instruction.startIndex..., in: instruction))
+  {
+    if let range = Range(match.range(at: 1), in: instruction) {
+      result.extensions.insert(String(instruction[range]))
+    }
+  }
+  let quotedExtension = try NSRegularExpression(
+    pattern: #"(?i)[\"“‘']\.([a-z0-9]{1,10})[\"”’']\s+(?:files?|documents?)\b"#)
+  for match in quotedExtension.matches(in: clause, range: NSRange(clause.startIndex..., in: clause))
+  {
+    if let range = Range(match.range(at: 1), in: clause) {
+      result.extensions.insert(clause[range].lowercased())
+    }
+  }
+  let nameFilter = try NSRegularExpression(
+    pattern:
+      #"(?i)\b(?:names?|filenames?|files?)\s+(?:that\s+)?(?:contain(?:s|ing)?|include(?:s|ing)?|matching)\s+[\"“‘']([^\"”’']+)[\"”’']"#
+  )
+  for match in nameFilter.matches(in: clause, range: NSRange(clause.startIndex..., in: clause)) {
+    if let range = Range(match.range(at: 1), in: clause) {
+      result.names.insert(String(clause[range]))
+    }
+  }
+  return result
+}
+
+private func selectionClauses(_ request: String) throws -> (
+  actions: [String], constraints: [String]
+) {
+  // Split the request independently of the model's clause/effect declarations. Quoted literals
+  // are consumed first so action words inside a name or prefix cannot introduce another scope.
+  let preservation =
+    #"keep(?:ing)?|preserv\w*|retain(?:ing)?|leav(?:e|ing)|never|without|don't|do\s+not"#
+  let sorting =
+    #"sort\w*|mov(?:e|ing)|put\w*|organi[sz]\w*|group\w*|arrang\w*|bucket\w*|collect\w*|separat\w*|stor\w*|categori[sz]\w*|classif\w*|plac\w*|relocat\w*"#
+  let naming =
+    #"renam\w*|giv(?:e|ing)|lower[ -]?case|upper[ -]?case|title[ -]?case|all\s+caps|capitaliz\w*|replac\w*|chang\w*|us(?:e|ing)|swap\w*|normaliz\w*|substitut\w*|prepend\w*|append\w*|prefix|suffix|start\w*|begin\w*"#
+  let boundaries = try NSRegularExpression(
+    pattern:
+      #"[\"“][^\"”]*[\"”]|‘[^’]*’|(?<!\w)'[^']*'(?!\w)|(?:\s+(?:and|but|then|while)\s+|[,;.!?]\s*|\s+(?=(?:preserving|keeping|retaining|leaving)\b))(?=(?:please\s+)?(?:"#
+      + preservation + "|" + sorting + "|" + naming + #")\b)"#,
+    options: .caseInsensitive)
+  var clauses: [String] = []
+  var start = request.startIndex
+  for match in boundaries.matches(in: request, range: NSRange(request.startIndex..., in: request)) {
+    guard let range = Range(match.range, in: request),
+      !["\"", "“", "‘", "'"].contains(String(request[range].prefix(1)))
+    else { continue }
+    clauses.append(String(request[start..<range.lowerBound]))
+    start = range.upperBound
+  }
+  clauses.append(String(request[start...]))
+  var actions: [String] = []
+  var constraints: [String] = []
+  for clause in clauses {
+    let words = metadataInstructionText(clause).trimmingCharacters(in: .whitespacesAndNewlines)
+    let constraint =
+      words.range(
+        of: #"^(?:please\s+)?(?:"# + preservation + #")\b"#,
+        options: .regularExpression) != nil
+    if constraint { constraints.append(clause) } else { actions.append(clause) }
+  }
+  return (actions, constraints)
+}
+
+private func validatePreservationConstraints(
+  _ clauses: [String], hasSort: Bool, hasRename: Bool, selectedExtensions: Set<String>
+) throws {
+  for clause in clauses {
+    let words = metadataInstructionText(clause).trimmingCharacters(in: .whitespacesAndNewlines)
+    let protectedExtensions = try selectionRestrictions(in: clause).extensions
+    let disjoint =
+      !selectedExtensions.isEmpty && !protectedExtensions.isEmpty
+      && selectedExtensions.isDisjoint(with: protectedExtensions)
+    let names = containsWord(words, ["name", "names", "filename", "filenames"])
+    let contents = containsWord(words, ["content", "contents", "bytes"])
+    let unchanged = containsWord(
+      words, ["unchanged", "original", "preserve", "preserving", "retain"])
+    // A global filter cannot encode action-specific exceptions. Only redundant preservation
+    // of data/names is harmless here; never turn a negative/preservation clause into a filter.
+    if !disjoint
+      && ((names && hasRename)
+        || (hasSort && containsWord(words, ["folder", "folders", "location", "untouched"])))
+    {
+      throw IntentViolation.selection
+    }
+    if names || contents {
+      guard unchanged else { throw IntentViolation.selection }
+    } else if !protectedExtensions.isEmpty && !disjoint {
+      let forbidsRenaming =
+        words.range(
+          of: #"^(?:never|don't|do\s+not)\s+rename\b"#, options: .regularExpression) != nil
+      guard !hasRename && forbidsRenaming else { throw IntentViolation.selection }
+    }
   }
 }
 

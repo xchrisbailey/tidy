@@ -37,6 +37,11 @@ struct ModelSmoke {
     print("Native verified load + readiness check seconds: \(started.duration(to: .now))")
     reportMemory("loaded")
     await reportMetrics(runtime)
+    if CommandLine.arguments.contains("--selection-authority-only") {
+      try await selectionAuthoritySmoke(runtime)
+      await runtime.unload()
+      return
+    }
     if CommandLine.arguments.contains("--metadata-evidence-only") {
       try await taskCoordinationSmoke(runtime)
       await runtime.unload()
@@ -209,6 +214,49 @@ struct ModelSmoke {
       "Offline evidence-based English/Spanish text naming passed: two changes, protected dates/IDs/names, original bytes and reopened undo; seconds: \(start.duration(to: .now))"
     )
     await reportMetrics(runtime)
+  }
+
+  static func selectionAuthoritySmoke(_ runtime: MLXLocalModelRuntime) async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+      "tidy-selection-\(UUID())")
+    let folder = root.appendingPathComponent("Selected")
+    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let names: Set<String> = ["Report.pdf", "Notes.txt"]
+    let bytes = Data("non-sensitive metadata-only qualification fixture".utf8)
+    for name in names { try bytes.write(to: folder.appendingPathComponent(name)) }
+    let bookmark = root.appendingPathComponent("settings/folder.bookmark")
+    let coordinator = TaskCoordinator(bookmarkFile: bookmark)
+    let data = try folder.bookmarkData(
+      options: [.withSecurityScope], includingResourceValuesForKeys: nil, relativeTo: nil)
+    var stale = false
+    let granted = try URL(
+      resolvingBookmarkData: data, options: [.withSecurityScope, .withoutUI, .withoutMounting],
+      relativeTo: nil, bookmarkDataIsStale: &stale)
+    guard !stale else { throw LocalInferenceError.smokeCheckFailed }
+    _ = try await coordinator.selectFolderForWriting(granted)
+    let outcome = try await coordinator.planTask(
+      request: "Sort all files by type and keep PDF filenames unchanged"
+    ) { system, user, limit in
+      try await runtime.completeJSON(system: system, user: user, maximumOutputTokens: limit)
+    }
+    guard case .plan(let plan) = outcome, plan.changedCount == 2, plan.renameCount == 0,
+      Set(plan.changes.map(\.originalName)) == names,
+      Set(plan.changes.map(\.destinationName)) == names,
+      plan.changes.allSatisfy({ $0.destinationFolder == "Documents" })
+    else { throw LocalInferenceError.smokeCheckFailed }
+    guard try await coordinator.execute(plan).changed.count == 2 else {
+      throw LocalInferenceError.smokeCheckFailed
+    }
+    try await TaskCoordinator(bookmarkFile: bookmark).undoTask(plan.id)
+    for name in names {
+      guard try Data(contentsOf: folder.appendingPathComponent(name)) == bytes else {
+        throw LocalInferenceError.smokeCheckFailed
+      }
+    }
+    print(
+      "Offline actual-model all-files sort with PDF-name preservation passed: both files moved, unchanged names/bytes and reopened undo"
+    )
   }
 
   static func taskCoordinationSmoke(_ runtime: MLXLocalModelRuntime) async throws {
