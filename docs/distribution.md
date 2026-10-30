@@ -36,6 +36,7 @@ From the clean committed worktree `/Users/chris/dev/utils/tidy-ticket-16`:
 
 ```sh
 swift test --disable-automatic-resolution
+bash scripts/release-tests.sh
 bash scripts/lint.sh
 git diff --check
 bash scripts/package-candidate.sh --unqualified
@@ -47,9 +48,36 @@ Also record `swift test --configuration release --disable-automatic-resolution`:
 the current unbundled release test runner fails PDF/OCR tests with inspection
 `unavailable`, because the SwiftPM supervisor adapter is intentionally DEBUG-only.
 Production/release inspection requires the packaged XPC service. Do not add an
-in-process parser or release CLI fallback to turn this into a pass. The complete
-debug suite and optimized packaged diagnostic are distinct evidence; neither
-erases the release CLI suite failure or substitutes for final-app qualification.
+in-process parser or release CLI fallback to turn this into a pass. Its failed
+history remains a failure. Use `bash scripts/release-tests.sh` for the full proper-host
+optimized verification: all coordinator cases, not just the model smoke examples.
+
+The harness copies Xcode's SwiftPM testing helper into a signed, hardened local
+`.app`, loads the same optimized `TidyCoreTests.xctest`, and supplies the normally
+linked production XPC service/parser with their unchanged containment profile.
+Test-only Apple-framework linker paths avoid DYLD injection/library-validation
+exceptions; production helper binaries are staged before that test-only link.
+The copied/local Xcode runner is not included in the download artifact.
+Source-vs-host discovery must match exactly and be nonempty; the run must report
+all discovered functions passing. Real-provider coverage still skips without an
+explicit authorized fixture. Complete optimized model/transfer/supervisor suites
+then run in their normal CLI host, preserving their real loopback transfer tests.
+
+This **test-only** host has the same unsandboxed fixture authority as the original
+CLI runner: existing tests create bookmarks programmatically, not via native picker
+grants. It does not certify the production app's App Sandbox permissions; those
+entitlements are not changed. The independent production parser remains sandboxed,
+with no in-process fallback. Hosted tests run serially to match the app's one-task
+boundary; concurrency inside each test is unchanged. A parallel hosted attempt
+hit unchanged inspection deadlines and remains failed stress evidence, not a pass.
+
+`bash scripts/release-tests.sh --without-service` is a negative control: the same
+five OCR parameter cases must fail with inspection `unavailable` (exit 1), proving
+the proper-host pass depends on the production service. Missing/incorrect entry
+points or incomplete discovery cannot count as a pass. Local hosts/discovery lists,
+logs and source/toolchain/signature hashes remain under `.build/release-tests/`.
+Neither hosted suites nor packaged model smokes replace native GUI/clean-user,
+hardware, manual recovery or final signed/notarized distribution qualification.
 
 Default authorized certificate SHA-1:
 `DDB64DD6A0BB35AA612980AEDD27B781C6A1E6F0`, Developer ID Application:

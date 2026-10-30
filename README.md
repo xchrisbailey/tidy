@@ -18,6 +18,7 @@ targets macOS 14+, but macOS 14 and 16-GB Macs are not qualified. No CI is used.
 bash scripts/build-app.sh
 open .build/Tidy.app
 swift test --disable-automatic-resolution
+bash scripts/release-tests.sh
 bash scripts/lint.sh
 ```
 
@@ -56,6 +57,12 @@ real temporary files and bookmarks. Model lifecycle/runtime and packaged inspect
 smokes supplement it. They do not establish native GUI behavior, real permission
 revocation, app-process relaunch, hardware support or a clean-user installation.
 See the [verification records](docs/verification/) for evidence and limitations.
+
+`scripts/release-tests.sh` runs the same complete optimized coordinator suite in a
+signed application test host with production XPC/parser containment, then the full
+optimized model/supervisor suites. Unbundled `swift test -c release` still fails
+native inspection cases; that failure is not relabeled a pass. Hosted serial
+coverage and the failed parallel stress attempt are recorded separately.
 
 Real-provider tests skip unless separately authorized disposable fixture paths
 are supplied. Do not test personal sync data or read/evict placeholders to manufacture
