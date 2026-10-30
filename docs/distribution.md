@@ -107,8 +107,10 @@ owner approvals before implementing promotion. Never relabel today's candidate.
 [Apple Developer ID guidance](https://developer.apple.com/developer-id/) requires
 appropriate signing, hardened runtime and testing, and documents `notarytool` and
 `stapler`. The owner has authorized creating a dedicated local `tidy-notary`
-profile for Developer ID team `5U2B7W5F39`; its creation/verification is not yet
-confirmed. The ephemeral `.build/notarization/setup-profile.sh` walkthrough opens
+profile for Developer ID team `5U2B7W5F39`. The operator confirmed completion and
+the non-secret local record reports read-only authentication verified at
+`2026-10-30T03:43:16Z`. No artifact has been submitted. The ephemeral
+`.build/notarization/setup-profile.sh` walkthrough opens
 Apple Account's app-specific-password instructions, lets `notarytool` collect the
 password directly through its secure Terminal prompt, then verifies with a
 read-only history request. Only non-secret profile/team/verification metadata is
@@ -117,8 +119,9 @@ wizard's environment file. No keychain credential discovery, secret extraction
 or automated Apple Account setup is permitted.
 No unqualified artifact is to be uploaded by this implementation.
 
-**Only after owner authorization to submit a reviewed artifact**, an operator must
-configure an authorized notarytool profile themselves (no secrets in git/chat).
+Profile configuration is independent of artifact submission and was performed
+locally by the operator (no secrets in git/chat). **Submission still requires
+separate owner authorization for a reviewed artifact.**
 These are exact command forms, not commands already executed; replace the profile
 and paths with explicit authorized values. Run from the candidate output directory:
 
