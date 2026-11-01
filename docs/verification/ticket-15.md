@@ -1,5 +1,31 @@
 # #15 — local qualification, not release approval
 
+## Stable-v1 follow-up, 2026-10-31
+
+[Abrupt-process recovery coverage](stable-v1-recovery.md) adds actual SIGKILL at
+eight journal/move/undo checkpoints and fresh same-executable process recovery.
+It supplements injected-error coverage without claiming native UI, provider,
+power-loss or hardware qualification. #15 remains open; owner deferrals remain.
+
+[Installed-beta native folder checks](stable-v1-native-permissions.md) subsequently
+verified real read/write selection, actual-process bookmark restoration, read-only
+write refusal, picker cancellation, sort/relaunch/undo, POSIX access denial and
+original-folder regrant. TCC/sandbox revocation is explicitly **not** established
+by POSIX denial. All fixture bytes and original permissions were restored.
+The pending-undo follow-up also passed: real native undo was refused with zero
+reversals during POSIX denial; original-folder regrant did not resume it; a new
+explicit undo restored both files and their bytes. No production fix was needed.
+The same-path directory-replacement follow-up also passed: granting the different
+directory, even through original-folder regrant, did not enable old undo. After
+restoring and regranting the actual original directory, explicit undo restored
+its files; all replacement canaries stayed unchanged. Regrant while the original
+remained at its renamed path was not qualified because picker navigation failed.
+A subsequent focused keyboard-navigation retry **did** qualify that bounded
+case: native regrant and explicit undo succeeded while the original remained
+renamed and the replacement occupied its recorded path. Independent inode/hash
+checks proved that only the renamed original changed. Earlier failed-navigation
+evidence remains intact; this does not qualify other volumes or TCC revocation.
+
 ## Corrective follow-up, 2026-10-29
 
 The user explicitly authorized fixing naming reliability and complete-plan context
