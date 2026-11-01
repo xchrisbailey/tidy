@@ -4,6 +4,65 @@ import Testing
 import TidyCore
 
 struct NativePlaceholderTests {
+  @Test(.enabled(if: ProcessInfo.processInfo.environment["TIDY_PROVIDER_FIXTURE_ROOT"] != nil))
+  func realProviderRefreshRecursivePlanAndFreshProcessPreservePlaceholders() throws {
+    let path = try #require(ProcessInfo.processInfo.environment["TIDY_PROVIDER_FIXTURE_ROOT"])
+    let folder = URL(fileURLWithPath: path, isDirectory: true)
+    let placeholders = ["cloud-only.txt", "Nested/nested-cloud-only.txt"]
+    let downloaded = ["downloaded.txt", "Nested/nested-downloaded.txt"]
+    let settings = FileManager.default.temporaryDirectory.appendingPathComponent(
+      "tidy-provider-\(UUID())")
+    defer { try? FileManager.default.removeItem(at: settings) }
+    for name in placeholders + downloaded {
+      let values = try folder.appendingPathComponent(name).resourceValues(forKeys: [
+        .isUbiquitousItemKey
+      ])
+      try #require(values.isUbiquitousItem == true)
+    }
+    for name in placeholders {
+      let state = try placeholderState(folder.appendingPathComponent(name))
+      try #require(state.dataless && state.notDownloaded && !state.downloading)
+    }
+    // Only confirmed downloaded fixture contents are read; never hash/open placeholders.
+    let contents = try downloaded.map { name in
+      let url = folder.appendingPathComponent(name)
+      let state = try placeholderState(url)
+      try #require(!state.dataless && !state.notDownloaded && !state.downloading)
+      return try Data(contentsOf: url)
+    }
+    let executable = try workerExecutable()
+    for mode in ["select", "restore", "restore"] {
+      let worker = Process()
+      worker.executableURL = executable
+      worker.arguments = [folder.path, settings.path, mode]
+      try worker.run()
+      worker.waitUntilExit()
+      try #require(worker.terminationReason == .exit && worker.terminationStatus == 0)
+      for name in placeholders {
+        let state = try placeholderState(folder.appendingPathComponent(name))
+        #expect(state.dataless && state.notDownloaded && !state.downloading)
+      }
+      for (name, original) in zip(downloaded, contents) {
+        let url = folder.appendingPathComponent(name)
+        let state = try placeholderState(url)
+        #expect(!state.dataless && !state.notDownloaded && !state.downloading)
+        #expect(try Data(contentsOf: url) == original)
+      }
+    }
+  }
+
+  private func workerExecutable() throws -> URL {
+    if let path = ProcessInfo.processInfo.environment["TIDY_PROVIDER_TEST_WORKER"] {
+      return URL(fileURLWithPath: path)
+    }
+    let arguments = ProcessInfo.processInfo.arguments
+    let index = try #require(arguments.firstIndex(of: "--test-bundle-path"))
+    return URL(fileURLWithPath: arguments[index + 1])
+      .deletingLastPathComponent().deletingLastPathComponent()
+      .deletingLastPathComponent().deletingLastPathComponent()
+      .appendingPathComponent("TidyProviderTestWorker")
+  }
+
   // Real provider fixtures are opt-in; an ordinary file cannot stand in for a placeholder.
   @Test(
     .enabled(

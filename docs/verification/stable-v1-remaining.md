@@ -143,6 +143,11 @@ model coverage.
 
 ## Remaining gates and required prerequisites
 
+Subsequent [authorized iCloud checks](stable-v1-icloud.md) add bounded real-provider
+inventory/refresh/recursive-plan and fresh-worker restoration evidence. The table
+below retains the disposition before that follow-up; other provider/native paths
+are not silently qualified by it.
+
 | Gate | Disposition |
 | --- | --- |
 | Real-provider cloud-only nonhydration, recursive/refresh/relaunch coverage | Unverified; requires separately authorized disposable provider fixtures. Ordinary files and marker flags do not substitute. |

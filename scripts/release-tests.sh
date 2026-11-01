@@ -81,6 +81,7 @@ fi
 # The application runs one task at a time. Suite-wide parallel fixture setup can
 # starve the unchanged parser deadlines; explicit in-test concurrency remains intact.
 TIDY_RECOVERY_TEST_WORKER="$bin_path/TidyRecoveryTestWorker" \
+  TIDY_PROVIDER_TEST_WORKER="$bin_path/TidyProviderTestWorker" \
   "$app/Contents/MacOS/swiftpm-testing-helper" --test-bundle-path "$test_image" \
   --testing-library swift-testing --no-parallel 2>&1 | tee "$out/core.log"
 python3 - "$out" <<'PY'
