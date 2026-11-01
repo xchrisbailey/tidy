@@ -1,5 +1,15 @@
 # #15 — local qualification, not release approval
 
+## Real-provider follow-up, 2026-11-01
+
+[Authorized iCloud checks](stable-v1-icloud.md) now establish actual cloud-only
+placeholder exclusion without observed hydration during inventory, refresh,
+recursive planning and same-worker fresh-process bookmark restoration. Full debug
+and hosted optimized suites passed with both provider tests enabled, not skipped.
+This is bounded iCloud/coordinator evidence, not every provider, content task,
+native GUI relaunch or the aggregate stable-v1 gate. Other prerequisites and owner
+deferrals remain unchanged.
+
 ## Stable-v1 follow-up, 2026-10-31
 
 [Remaining local qualification](stable-v1-remaining.md) records a reproduced/fixed
