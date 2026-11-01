@@ -25,6 +25,8 @@ let package = Package(
     .executableTarget(name: "TidyInspectionTestWorker", path: "Tests/InspectionTestWorker"),
     .executableTarget(
       name: "TidyRecoveryTestWorker", dependencies: ["TidyCore"], path: "Tests/RecoveryTestWorker"),
+    .executableTarget(
+      name: "TidyModelTestWorker", dependencies: ["TidyModel"], path: "Tests/ModelTestWorker"),
     .target(name: "TidyModel"),
     .target(
       name: "TidyModelRuntime",

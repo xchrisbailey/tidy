@@ -357,11 +357,15 @@ actor ResponseSequence {
 }
 
 struct LanguageFixture: Sendable {
-  let root = FileManager.default.temporaryDirectory.appendingPathComponent(
-    "tidy-language-\(UUID())")
+  let root: URL
   var folder: URL { root.appendingPathComponent("Selected") }
   var bookmark: URL { root.appendingPathComponent("settings/folder.bookmark") }
   init() throws {
+    let parent =
+      ProcessInfo.processInfo.environment["TIDY_TEST_FIXTURE_ROOT"].map {
+        URL(fileURLWithPath: $0, isDirectory: true)
+      } ?? FileManager.default.temporaryDirectory
+    root = parent.appendingPathComponent("tidy-language-\(UUID())")
     try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
   }
   func write(_ name: String) throws {

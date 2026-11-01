@@ -91,8 +91,7 @@ public struct URLSessionModelTransfer: ModelTransfer {
 
   private func discardResumeFile(_ file: URL) throws {
     if let data = try? Data(contentsOf: file),
-      let plist = try? PropertyListSerialization.propertyList(from: data, format: nil),
-      let dictionary = plist as? [String: Any],
+      let dictionary = resumeMetadata(data),
       let name = dictionary["NSURLSessionResumeInfoTempFileName"] as? String,
       !name.isEmpty, name == URL(fileURLWithPath: name).lastPathComponent,
       name.hasPrefix("CFNetworkDownload_")
@@ -101,6 +100,31 @@ public struct URLSessionModelTransfer: ModelTransfer {
       try ModelStorage.removeIfPresent(temporary)
     }
     try ModelStorage.removeIfPresent(file)
+  }
+
+  private func resumeMetadata(_ data: Data) -> [String: Any]? {
+    guard let plist = try? PropertyListSerialization.propertyList(from: data, format: nil),
+      let dictionary = plist as? [String: Any]
+    else { return nil }
+    guard dictionary["$archiver"] as? String == "NSKeyedArchiver" else { return dictionary }
+    // Newer URLSession versions archive this dictionary. Decode only Foundation data
+    // classes; corrupt or unfamiliar resume data must never instantiate application objects.
+    guard let decoder = try? NSKeyedUnarchiver(forReadingFrom: data) else { return nil }
+    decoder.requiresSecureCoding = true
+    decoder.decodingFailurePolicy = .setErrorAndReturn
+    defer { decoder.finishDecoding() }
+    guard
+      let key = ["NSKeyedArchiveRootObjectKey", NSKeyedArchiveRootObjectKey].first(where: {
+        decoder.containsValue(forKey: $0)
+      })
+    else { return nil }
+    let classes: [AnyClass] = [
+      NSDictionary.self, NSArray.self, NSString.self, NSNumber.self, NSData.self, NSURL.self,
+    ]
+    guard let metadata = decoder.decodeObject(of: classes, forKey: key) as? [String: Any],
+      decoder.error == nil
+    else { return nil }
+    return metadata
   }
 }
 

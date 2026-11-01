@@ -6,7 +6,7 @@ import TidyCore
 struct RecoveryTestWorker {
   static func main() async throws {
     let arguments = CommandLine.arguments
-    guard arguments.count == 3 else { exit(2) }
+    guard arguments.count == 3 || arguments.count == 4 else { exit(2) }
     // A stalled fixture must fail rather than leave the parent waiting indefinitely.
     alarm(20)
     let root = URL(fileURLWithPath: arguments[1], isDirectory: true)
@@ -15,6 +15,13 @@ struct RecoveryTestWorker {
       let coordinator = TaskCoordinator(bookmarkFile: bookmark)
       let statuses = try await coordinator.recoveryReport().map { $0.status.rawValue }
       try FileHandle.standardOutput.write(contentsOf: JSONEncoder().encode(statuses))
+      return
+    }
+    if arguments[2] == "undo" {
+      let coordinator = TaskCoordinator(bookmarkFile: bookmark)
+      let operations = try await coordinator.undoHistory()
+      guard let task = operations.first?.taskID else { exit(2) }
+      try await coordinator.undoTask(task)
       return
     }
     let checkpoint: OperationCheckpoint
@@ -38,7 +45,11 @@ struct RecoveryTestWorker {
         while true { pause() }
       }
     }
-    _ = try await coordinator.selectFolderForWriting(root.appendingPathComponent("Selected"))
+    let folder =
+      arguments.count == 4
+      ? URL(fileURLWithPath: arguments[3], isDirectory: true)
+      : root.appendingPathComponent("Selected")
+    _ = try await coordinator.selectFolderForWriting(folder)
     let plan = try await coordinator.planSortByType(request: "Sort by type")
     _ = try await coordinator.execute(plan)
     if checkpoint == .undoIntentSaved || checkpoint == .afterUndoMove
