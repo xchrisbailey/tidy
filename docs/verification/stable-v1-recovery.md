@@ -88,6 +88,12 @@ That restarted command completed successfully with the full results above.
 
 ## Remaining #15 gates
 
+Subsequent [remaining-host checks](stable-v1-remaining.md) add case-sensitive APFS,
+detached-volume recovery, isolated native destructive controls, model replacement
+fixture SIGKILL, real URLSession partial cleanup/eviction, storage rejection and
+native scope/recursive undo evidence. The table below records this document's
+earlier disposition; use that follow-up for current per-check limits.
+
 This closes the automated **actual process interruption at the exposed durable
 checkpoints** gap, not the whole recovery/hardware qualification requirement.
 It does not simulate power loss, kill between arbitrary filesystem instructions,

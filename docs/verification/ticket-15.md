@@ -2,6 +2,13 @@
 
 ## Stable-v1 follow-up, 2026-10-31
 
+[Remaining local qualification](stable-v1-remaining.md) records a reproduced/fixed
+URLSession partial-cleanup defect, replacement SIGKILL tests, case-sensitive APFS
+and detached-volume checks, isolated native history/model controls, 1,001-file
+refusal and default/explicit recursive sorting with native undo. Debug/optimized
+suites and packaged smokes passed. External prerequisites and owner deferrals
+remain explicit; this does not complete the aggregate stable-v1 gates.
+
 [Abrupt-process recovery coverage](stable-v1-recovery.md) adds actual SIGKILL at
 eight journal/move/undo checkpoints and fresh same-executable process recovery.
 It supplements injected-error coverage without claiming native UI, provider,
