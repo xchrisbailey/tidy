@@ -209,7 +209,7 @@ extension ModelSmoke {
 
   static func qualificationBatch(
     _ runtime: MLXLocalModelRuntime, root: URL, fixtures: [QualificationFixture],
-    loadingTime: Duration
+    loadingTime: Duration, expectedChanges: Int? = nil
   ) async throws -> Bool {
     let metadata = fixtures.isEmpty
     let label = metadata ? "metadata100" : "contentHeavy12"
@@ -258,6 +258,7 @@ extension ModelSmoke {
       await reportMetrics(runtime)
       reportMemory("QUAL \(label)")
       return result.failed.isEmpty && result.unprocessed.isEmpty
+        && (expectedChanges == nil || result.changed.count == expectedChanges)
         && (!metadata || (result.changed.count == 100 && elapsed < .seconds(60)))
     } catch {
       let intact = originals.allSatisfy { name, bytes in

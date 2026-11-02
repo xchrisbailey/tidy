@@ -203,6 +203,8 @@ extension TaskCoordinator {
     The app applies validated rules to EVERY captured eligible file, honoring selection and abstaining locally when metadata/evidence is insufficient. The app authorizes subfolder inclusion only when explicitly requested; default direct children. Existing folders must never be moved or renamed. No content edits, deletion, copying, transmission or chat. \
     If ANY clause is unsupported, status unsupported for the WHOLE request, offer metadata-only resubmission, files empty. \
     If intent or a date source is unclear, status clarification with a specific question, files empty. Never guess a missing date or name. \
+    Vague organizing or renaming without a criterion is clarification, NOT unsupported or an empty plan. Ask which sorting criterion or rename rule to use. \
+    Selecting one exact filename is not representable: ask for an extension filter or explicitly quoted name-substring filter instead. Never silently drop that restriction or reinterpret an exact filename as nameContains. \
     For a clear supported task, status plan, message empty, files MUST be the literal string "all". Do not enumerate or invent source IDs. For clarification/unsupported, files is an empty array. \
     Rules are expanded and validated locally against actual snapshots; do NOT output destination paths or invented names. \
     Preserve extensions exactly, all dates, digit-bearing identifiers and recognizable words. Case and separator changes exclude protected date/identifier tokens. \
@@ -238,6 +240,11 @@ extension TaskCoordinator {
     {"status":"plan","message":"","clauses":[{"text":"Rename files replacing spaces with hyphens","effect":"rename"}],"sort":{"kind":"none","evidence":"","value":""},"rename":[{"kind":"separator","evidence":"replacing spaces with hyphens","value":"-","from":" "}],"selection":{"extensions":[],"nameContains":"","evidence":""},"files":"all"} \
     Example combined request 'Group by filename month and lowercase names' with ONE file: \
     {"status":"plan","message":"","clauses":[{"text":"Group by filename month and lowercase names","effect":"sort+rename"}],"sort":{"kind":"filenameMonth","evidence":"filename month","value":""},"rename":[{"kind":"lowercase","evidence":"lowercase names","value":"","from":""}],"selection":{"extensions":[],"nameContains":"","evidence":""},"files":"all"} \
-    For clarification/unsupported use sort none with empty evidence/value, rename [], empty selection fields, files []; preserve exact clause coverage and a nonempty short message.
+    For clarification/unsupported use sort none with empty evidence/value, rename [], empty selection fields, files []; preserve exact clause coverage and a nonempty short message. \
+    Example for 'Rename these files' (no rename rule specified): \
+    {"status":"clarification","message":"How should the files be renamed: change case, replace separators, add a quoted prefix, or use their contents? Resubmit the complete request with your choice.","clauses":[{"text":"Rename these files","effect":"ambiguous"}],"sort":{"kind":"none","evidence":"","value":""},"rename":[],"selection":{"extensions":[],"nameContains":"","evidence":""},"files":[]} \
+    Example for 'Sort only notes.txt by type' (exact-file selection is not supported): \
+    {"status":"clarification","message":"Exact-file selection is not supported. Would you like to select an extension or files whose names contain a quoted substring? Resubmit the complete request with that choice.","clauses":[{"text":"Sort only notes.txt by type","effect":"ambiguous"}],"sort":{"kind":"none","evidence":"","value":""},"rename":[],"selection":{"extensions":[],"nameContains":"","evidence":""},"files":[]} \
+    For any clarification, copy the ACTUAL complete request into the ambiguous clause; never omit clauses or output an action rule with missing parameters.
     """
 }

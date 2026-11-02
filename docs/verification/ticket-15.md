@@ -1,5 +1,74 @@
 # #15 — local qualification, not release approval
 
+## Repeated-workload resource follow-up, 2026-11-02
+
+[Bounded 20-round run](stable-v1-sustained.md) completed 2,000 metadata moves and
+240 content renames with exact counts, preserved bytes and reopened undo, plus
+same-artifact unload/reload cycles. OS main-process lifetime peak footprint was
+4.69 GB; measured post-round footprint grew about 99 MB. This is not leak-proof,
+induced-pressure or minimum-hardware qualification. Full suites and lint passed;
+the genuine resource/external gates and existing owner deferrals remain open.
+
+## Clarification fix and native verification, 2026-11-02
+
+[Clarification follow-up](stable-v1-clarification.md) reproduces the three native
+failures with the actual packaged candidate and fixes their prompt guidance without
+relaxing validation. Six request variants pass the new real-model regression;
+all three original requests now visibly ask questions natively with no mutation.
+Explicit resubmission and native undo pass. Full suites, packaged model smoke and
+unchanged corpus replay pass; remaining external gates and deferrals stay open.
+
+## Resumed native matrix, 2026-11-02
+
+[Native follow-up](stable-v1-native-resume.md) establishes 101-file confirmation/
+Cancel, confirmed acceptance, actual relaunch and full native undo; explicit
+resubmission/undo after plan errors; deletion refusal; and bounded content-marker
+absence after content naming/relaunch/undo. All original fixture/source hashes and
+unrelated canaries survived; the isolated model was removed natively. Ambiguous
+requests failed closed with plan errors, **not clarification questions**; that
+native gap remains. The failed initial numeric-canary assertion is retained, not
+counted as body-only retention evidence. Aggregate gates and deferrals stay open.
+
+## Unattended local follow-up, 2026-11-02
+
+[Overnight evidence](stable-v1-overnight.md) records a reproduced/fixed truncated
+JPEG framing defect, expanded native codec integration cases and real iCloud
+content-planning nonhydration. Full debug/optimized suites passed with provider
+and identity opt-ins enabled; packaged smokes and the unchanged fixed corpus were
+rerun. Native UI work was blocked by session lock, not substituted with simulated
+passes. Volume-incarnation research keeps the identity design paused. #15 remains
+open; hardware/independent review/resource gaps and owner deferrals are unchanged.
+
+## Stable-identity feasibility gate, 2026-11-01
+
+[Phase-1 diagnostics](stable-v1-identity-feasibility.md) establish a capability
+candidate on this host: descriptor capture under actual App Sandbox, birth-time
+rewrite/rename stability, replacement distinction and read-only remounts of the
+owned APFS image. Full debug/optimized suites and lint pass. Independent review
+still recommends stopping: durable volume-incarnation safety across clone/restore/
+rollback is unproved. No production identity policy changed; the undo limitation,
+permission-revocation gap and aggregate stable-v1 gates remain open.
+
+## Birth-time investigation, 2026-11-01
+
+[Controlled investigation](stable-v1-birthtime-investigation.md) reproduced the
+Documents directory birth-time drift with raw mkdir/lstat and no Tidy journal;
+changed values match floating-point timestamp conversion. Local controls stayed
+stable; the writer remains unattributed. New root/destination integration cases
+lock in safe refusal for 74-nanosecond changes. Full debug/optimized suites and
+lint passed. The best-effort undo limitation is documented, not fixed; no identity
+policy, production behavior, TCC disposition or stable-v1 checkbox changed.
+
+## Permission-revocation attempt, 2026-11-01
+
+[Isolated native attempt](stable-v1-permission-revocation.md) could not establish
+revocation: System Settings exposed no Files & Folders entry for the test app,
+and no permission was changed. Normal cleanup undo then safely refused a separate
+sorting-folder birth-time mismatch of 74 nanoseconds. Files and journal were
+preserved; synthetic paths/hashes were restored manually, not counted as native
+undo. The metadata-change cause needs controlled investigation. TCC/sandbox
+revocation and the aggregate stable-v1 gates remain open.
+
 ## Real-provider follow-up, 2026-11-01
 
 [Authorized iCloud checks](stable-v1-icloud.md) now establish actual cloud-only

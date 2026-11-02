@@ -75,7 +75,11 @@ struct OCRNamingTests {
 
   @Test(arguments: [
     "blank", "poor", "malformed", "mismatch", "unsupported", "oversize", "dimensions", "pixels",
-    "multi", "lockedScan", "ownerScan", "renderBox",
+    "multi", "apng", "heifSequence", "truncatedPNG", "truncatedJPEG",
+    "pngMissingEnd", "truncatedJPEGEmbeddedEnd", "invalidPNGChunkLength",
+    "invalidJPEGSegmentLength",
+    "jpegMissingEnd", "jpegTerminalFF", "jpegStuffedEnd", "jpegRestartWithoutEnd",
+    "lockedScan", "ownerScan", "renderBox",
   ])
   func unreadableOrExcessiveInputsAbstainWithoutNaming(kind: String) async throws {
     let fixture = try LanguageFixture()
@@ -118,18 +122,54 @@ struct OCRNamingTests {
     case "pixels":
       bytes = try blankRaster(width: 6400, height: 6400)
       expected = .inputLimit
-    case "multi":
-      ext = "tiff"
+    case "truncatedPNG", "truncatedJPEG", "pngMissingEnd", "truncatedJPEGEmbeddedEnd",
+      "invalidPNGChunkLength", "invalidJPEGSegmentLength", "jpegMissingEnd", "jpegTerminalFF",
+      "jpegStuffedEnd", "jpegRestartWithoutEnd":
+      if [
+        "truncatedJPEG", "truncatedJPEGEmbeddedEnd", "invalidJPEGSegmentLength", "jpegMissingEnd",
+        "jpegTerminalFF", "jpegStuffedEnd", "jpegRestartWithoutEnd",
+      ].contains(kind) {
+        ext = "jpg"
+        bytes = try rasterFixture(title, type: "public.jpeg")
+      }
+      if kind == "truncatedJPEGEmbeddedEnd" { bytes = jpegWithEmbeddedEndComment(bytes) }
+      if kind == "pngMissingEnd" {
+        bytes = Data(bytes.dropLast(12))
+      } else if kind == "jpegMissingEnd" {
+        bytes = Data(bytes.dropLast(2))
+      } else if kind == "jpegTerminalFF" {
+        bytes = Data(bytes.dropLast())
+      } else if ["jpegStuffedEnd", "jpegRestartWithoutEnd"].contains(kind) {
+        bytes = Data(bytes.dropLast(2))
+        bytes.append(contentsOf: kind == "jpegStuffedEnd" ? [0xff, 0x00, 0xd9] : [0xff, 0xd0])
+      } else if kind == "invalidPNGChunkLength" {
+        bytes.replaceSubrange(8..<12, with: [0xff, 0xff, 0xff, 0xff])
+      } else if kind == "invalidJPEGSegmentLength" {
+        bytes.replaceSubrange(4..<6, with: [0xff, 0xff])
+      } else {
+        bytes = Data(bytes.prefix(bytes.count * 2 / 3))
+      }
+      expected = .unreadable
+    case "multi", "apng", "heifSequence":
+      ext = kind == "multi" ? "tiff" : kind == "apng" ? "png" : "heic"
+      let type = kind == "multi" ? "public.tiff" : kind == "apng" ? "public.png" : "public.heics"
       let output = NSMutableData()
       let destination = try #require(
-        CGImageDestinationCreateWithData(output, "public.tiff" as CFString, 2, nil))
+        CGImageDestinationCreateWithData(output, type as CFString, 2, nil))
+      if kind == "apng" {
+        CGImageDestinationSetProperties(
+          destination,
+          [kCGImagePropertyPNGDictionary: [kCGImagePropertyAPNGLoopCount: 0]] as CFDictionary)
+      }
       let source = try #require(CGImageSourceCreateWithData(bytes as CFData, nil))
       let image = try #require(CGImageSourceCreateImageAtIndex(source, 0, nil))
       CGImageDestinationAddImage(destination, image, nil)
       CGImageDestinationAddImage(destination, image, nil)
       #expect(CGImageDestinationFinalize(destination))
       bytes = output as Data
-      expected = .unsupported
+      let encoded = try #require(CGImageSourceCreateWithData(bytes as CFData, nil))
+      try #require(CGImageSourceGetCount(encoded) == 2)
+      expected = kind == "heifSequence" ? .unreadable : .unsupported
     case "lockedScan", "ownerScan", "renderBox":
       ext = "pdf"
       let document = try #require(PDFDocument(data: scannedFixture([bytes])))
@@ -168,15 +208,36 @@ struct OCRNamingTests {
     #expect(try Data(contentsOf: source) == bytes)
   }
 
-  @Test(arguments: ["png", "JPG", "heic", "tiff", "pdf"])
-  func screenshotEvidenceNamesAndReopenedUndoPreservesBytes(ext: String) async throws {
+  @Test(arguments: [
+    "png", "JPG", "heic", "heif", "tiff", "pdf", "paddedPNG", "paddedJPEG", "jpegWithComment",
+    "progressiveJPEG",
+  ])
+  func screenshotEvidenceNamesAndReopenedUndoPreservesBytes(format: String) async throws {
     let fixture = try LanguageFixture()
     defer { fixture.remove() }
     let title = "Acme Invoice AB123 2026-10-28"
+    let ext =
+      [
+        "paddedPNG": "png", "paddedJPEG": "JPG", "jpegWithComment": "JPG", "progressiveJPEG": "JPG",
+      ][format] ?? format
     let type =
       ext == "JPG"
-      ? "public.jpeg" : ext == "heic" ? "public.heic" : ext == "tiff" ? "public.tiff" : "public.png"
-    let raster = try rasterFixture(title + "\nPrivateCanary services", type: type)
+      ? "public.jpeg"
+      : ["heic", "heif"].contains(ext)
+        ? "public.heic" : ext == "tiff" ? "public.tiff" : "public.png"
+    var raster = try rasterFixture(
+      title + "\nPrivateCanary services", type: type, progressive: format == "progressiveJPEG")
+    if format == "progressiveJPEG" {
+      let source = try #require(CGImageSourceCreateWithData(raster as CFData, nil))
+      let properties = try #require(
+        CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any])
+      let jfif = try #require(properties[kCGImagePropertyJFIFDictionary] as? [CFString: Any])
+      try #require(jfif[kCGImagePropertyJFIFIsProgressive] as? Bool == true)
+    }
+    if ["paddedPNG", "paddedJPEG"].contains(format) {
+      raster.append(Data(repeating: 0, count: 128))
+    }
+    if format == "jpegWithComment" { raster = jpegWithEmbeddedEndComment(raster) }
     let bytes = try ext == "pdf" ? scannedFixture([raster]) : raster
     let source = fixture.folder.appendingPathComponent("scan.\(ext)")
     try bytes.write(to: source)
@@ -318,9 +379,18 @@ func scannedFixture(_ images: [Data], rotation: Int = 0) throws -> Data {
   return try #require(document.dataRepresentation())
 }
 
+func jpegWithEmbeddedEndComment(_ bytes: Data) -> Data {
+  var output = Data(bytes.prefix(2))
+  output.append(contentsOf: [
+    0xff, 0xfe, 0x00, 0x0a, 0x54, 0x49, 0x44, 0x59, 0xff, 0xd9, 0x58, 0x59,
+  ])
+  output.append(contentsOf: bytes.dropFirst(2))
+  return output
+}
+
 func rasterFixture(
   _ text: String, type: String = "public.png", orientation: Int = 1, upsideDown: Bool = false,
-  quarterTurn: Bool = false
+  quarterTurn: Bool = false, progressive: Bool = false
 ) throws -> Data {
   let context = try #require(
     CGContext(
@@ -354,9 +424,11 @@ func rasterFixture(
     rotated.draw(image, in: CGRect(x: 0, y: 0, width: 1600, height: 600))
     image = try #require(rotated.makeImage())
   }
-  CGImageDestinationAddImage(
-    destination, image,
-    [kCGImagePropertyOrientation: orientation] as CFDictionary)
+  var properties: [CFString: Any] = [kCGImagePropertyOrientation: orientation]
+  if progressive {
+    properties[kCGImagePropertyJFIFDictionary] = [kCGImagePropertyJFIFIsProgressive: true]
+  }
+  CGImageDestinationAddImage(destination, image, properties as CFDictionary)
   #expect(CGImageDestinationFinalize(destination))
   return output as Data
 }
