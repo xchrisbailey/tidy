@@ -1,5 +1,11 @@
 # #15 — authorized iCloud Drive nonhydration checks
 
+**Subsequent follow-up:** [2026-11-02 evidence](stable-v1-overnight.md) adds real
+content-planning exclusion across fresh processes using these same authorized
+fixtures. Both cloud-only files remained undownloaded and local hashes unchanged;
+no provider mutations or native GUI provider qualification were claimed. The
+original Nov 1 observations and their limits below remain historical evidence.
+
 2026-11-01. Based on merged `main` at `f410afb`, on
 `ticket/15-icloud-qualification`. **#15 remains open; no hardware is formally
 qualified.** This establishes bounded real-provider evidence, not a universal

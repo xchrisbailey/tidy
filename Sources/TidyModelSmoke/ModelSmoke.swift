@@ -37,6 +37,31 @@ struct ModelSmoke {
     print("Native verified load + readiness check seconds: \(started.duration(to: .now))")
     reportMemory("loaded")
     await reportMetrics(runtime)
+    if CommandLine.arguments.contains("--qualify-sustained") {
+      do {
+        try await qualificationSustained(runtime, modelDirectory: setup.modelDirectory)
+      } catch {
+        await runtime.unload()
+        print(
+          "SUSTAINED failed: \(qualificationErrorCode(error)); no pressure or hardware qualification"
+        )
+        exit(EXIT_FAILURE)
+      }
+      await runtime.unload()
+      reportMemory("SUSTAINED unloaded")
+      return
+    }
+    if CommandLine.arguments.contains("--clarification-only") {
+      do {
+        try await clarificationSmoke(runtime)
+      } catch {
+        await runtime.unload()
+        print("Clarification smoke failed: \(error)")
+        exit(EXIT_FAILURE)
+      }
+      await runtime.unload()
+      return
+    }
     if CommandLine.arguments.contains("--selection-authority-only") {
       try await selectionAuthoritySmoke(runtime)
       await runtime.unload()
@@ -432,7 +457,7 @@ struct ModelSmoke {
       }
     }
     print(
-      "\(phase): MLX active=\(memory.activeMemory) cache=\(memory.cacheMemory) peak=\(memory.peakMemory) physicalFootprint=\(status == 0 ? usage.ri_phys_footprint : 0) bytes"
+      "\(phase): MLX active=\(memory.activeMemory) cache=\(memory.cacheMemory) peak=\(memory.peakMemory) physicalFootprint=\(status == 0 ? usage.ri_phys_footprint : 0) lifetimeMaxPhysicalFootprint=\(status == 0 ? usage.ri_lifetime_max_phys_footprint : 0) memoryQueryStatus=\(status) bytes"
     )
   }
 }

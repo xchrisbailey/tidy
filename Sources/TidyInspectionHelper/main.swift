@@ -124,6 +124,9 @@ func render(_ page: PDFPage) -> CGImage? {
 }
 
 func inspectImage(_ input: Data, format: String) -> Reply {
+  // ImageIO can report complete status and produce OCR from a truncated stream.
+  // Require bounded PNG/JPEG framing before describing evidence as a whole image.
+  guard ImageFraming.isComplete(input, format: format) else { return Reply(code: "unreadable") }
   let types = [
     "png": ["public.png"], "jpg": ["public.jpeg"], "jpeg": ["public.jpeg"],
     "heic": ["public.heic", "public.heif"], "heif": ["public.heic", "public.heif"],
