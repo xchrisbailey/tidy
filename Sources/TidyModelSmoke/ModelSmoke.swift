@@ -8,6 +8,10 @@ import TidyModelRuntime
 @main
 struct ModelSmoke {
   @MainActor static func main() async throws {
+    if CommandLine.arguments.contains("--model-lifecycle-worker") {
+      try await modelLifecycleWorker()
+      return
+    }
     if CommandLine.arguments.contains("--inspection-only") {
       let index = CommandLine.arguments.firstIndex(of: "--worker-case")
       let workerCase = index.map { CommandLine.arguments[$0 + 1] }
