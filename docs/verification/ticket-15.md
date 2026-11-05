@@ -1,5 +1,55 @@
 # #15 — local qualification, not release approval
 
+## Large inventory and cancellation, 2026-11-04
+
+[Bounded large-inventory qualification](stable-v1-large-inventory.md) adds opt-in
+10,000-file workspace inventory/cancellation/oversized-task checks and isolated
+native filter/refresh/help/relaunch observations. All fixture bytes and prior
+history stayed exact. Full debug and hosted optimized pipelines passed with
+provider, identity, actual-ENOSPC and large-inventory checks enabled: 130
+coordinator, 16 model, two worker and 20 workspace functions. The optimized
+workspace heartbeat's 202 ms maximum gap is retained, not claimed as smooth UI
+latency. Slow/provider inventory, minimum configurations and pressure remain
+unqualified; formal deferrals and the identity feasibility STOP are unchanged.
+
+## OCR improvement disposition, 2026-11-04
+
+Owner directed [#25](https://github.com/xchrisbailey/tidy/issues/25) to be closed
+as wontfix/not planned for now, retaining the known limitation for later.
+[Diagnosis and scratch/API research](ticket-25.md) remain evidence, not a fix.
+Safe abstention, the original scores/denominators and the other #15 prerequisites
+are unchanged. Further OCR investigation is not current work without a new request
+or supported evidence.
+
+## I01/S01 abstention diagnosis, 2026-11-03
+
+[Actual-byte/OCR diagnosis](stable-v1-abstention-diagnosis.md) confirms the helper
+misread `I` as `1` and fused identifier/date tokens. The coordinator's existing
+ambiguity guard then abstained before any naming completion. Temporary branch
+tracing confirmed the path and was removed; no production safeguard was relaxed.
+Original review/scoring outcomes remain unchanged. Improving extraction—not
+guessing IDs or deleting the guard—is the next implementation boundary.
+
+## Owner fixed-corpus naming review, 2026-11-03
+
+[Owner human review](stable-v1-owner-naming-review.md) now covers all 32 observed
+outcomes, using source text rather than visual image/OCR inspection. Owner accepted
+22 proposals and eight controls, identified I01/S01 as missed opportunities, and
+the S03 spelling failure remains disqualified by the fixed rubric despite a keep
+decision. Scores remain 21/22 usable and 21/24 useful. This adds bounded human
+evidence, not uninvolved/representative assessment or aggregate #15 completion.
+
+## Activation interruption and disk exhaustion, 2026-11-03
+
+[Lifecycle/resource follow-up](stable-v1-lifecycle-resource.md) adds six actual-MLX
+activation SIGKILL cases with fresh verification/inference, plus real ENOSPC task/
+undo coverage on the approved disposable APFS image. Full debug/optimized suites
+passed with all opt-ins enabled (130 coordinator, 16 model, 2 worker, 18 workspace),
+as did packaged smokes and lint. No production policy changed. The evidence retains
+failed harness assumptions and distinguishes durable low-space success from safe
+refusal. Its final prerequisite table identifies what still needs external resources
+or an owner decision; #15 cannot honestly be closed from this host alone.
+
 ## Repeated-workload resource follow-up, 2026-11-02
 
 [Bounded 20-round run](stable-v1-sustained.md) completed 2,000 metadata moves and
